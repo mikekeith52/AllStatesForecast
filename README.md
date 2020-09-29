@@ -23,3 +23,4 @@ Builds the Forecaster object to create easily accessed forecasts for many time s
   - R_HOME (on my PC) : C:\Users\michaelkeith\Documents\R\R-4.0.2
 
 ## Output
+![](https://github.com/mikekeith52/AllStatesForecast/blob/master/gif/gif.gif)
