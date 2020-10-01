@@ -25,6 +25,7 @@ class Forecaster:
         self.mape = {}
         self.forecasts = {}
         self.feature_importance = {}
+        self.ordered_xreg = []
         self.best_model = ''
 
     def get_data_fred(self):
