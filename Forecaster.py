@@ -51,6 +51,7 @@ class Forecaster:
         self.mape = {}
         self.forecasts = {}
         self.feature_importance = {}
+        self.ordered_xreg = []
         self.best_model = ''
 
     def _score_and_forecast(self,call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars):
@@ -83,11 +84,11 @@ class Forecaster:
         f = regr.predict(new_data)
         self.forecasts[call_me] = list(f)
 
-    def _set_remaining_info(self,call_me,test_length,model_name,hyper_params):
+    def _set_remaining_info(self,call_me,test_length,model_form):
         """ sets the holdout_periods and model_form values in the self.info nested dictionary, where call_me (model nickname) is the key
         """
         self.info[call_me]['holdout_periods'] = test_length
-        self.info[call_me]['model_form'] = f"{model_name} - {hyper_params}"
+        self.info[call_me]['model_form'] = model_form
 
     def _train_test_split(self,test_length,Xvars='all'):
         """ returns an X/y full set, training set, and testing set
@@ -127,14 +128,14 @@ class Forecaster:
         return weights_df
 
     def _prepr(self,*args,write_Xvars='all'):
-        """ prepares the R environment by importing/installing libraries and writing out csv files (current/future datasets) to tmp_data_externals folder
+        """ prepares the R environment by importing/installing libraries and writing out csv files (current/future datasets) to tmp folder
             file names: tmp_r_current.csv, tmp_r_future.csv
             args are libs to import and/or install from R
             Parameters: args : str
                             library names to import into the R environment
                             if library name not found, will attempt to install (you will need to specify a CRAN mirror in a pop-up box)
                         write_Xvars : str or list, if str must be "all", default "all"
-                            Xvars to write to the tmp_data_externals folder in the csv files
+                            Xvars to write to the tmp folder in the csv files
         """
         from rpy2.robjects.packages import importr
         for lib in args:
@@ -150,6 +151,9 @@ class Forecaster:
         elif write_Xvars != 'all':
             print(f'unknown argument passed to write_Xvars: {write_Xvars}')
             return None
+
+        if 'tmp' not in os.listdir():
+            os.mkdir('tmp')
 
         current_df.to_csv(f'tmp/tmp_r_current.csv',index=False)
         
@@ -225,7 +229,6 @@ class Forecaster:
             self.future_dates = list(xreg_df.loc[xreg_df[date_col] > self.current_dates[-1],date_col])
             xreg_df = xreg_df.loc[xreg_df[date_col] >= self.current_dates[0]]
         xreg_df = pd.get_dummies(xreg_df,drop_first=True)
-        xreg_df = xreg_df
 
         if isinstance(process_missing,dict):
             for c, v in process_missing.items():
@@ -287,6 +290,23 @@ class Forecaster:
             self.current_xreg[c] = list(current_xreg_df[c])
             self.future_xreg[c] = list(future_xreg_df[c])
 
+    def set_and_check_data_types(self,check_xreg=True):
+        """ changes all attributes in self to lists, dicts, strs, or whatever makes it easier for the program to work with with no errors
+            if a conversion to these types is unsuccessfully, will raise an error
+            Parameters: check_xreg : bool, default True
+                if True, checks that self.current_xreg and self.future_xregs are dict types
+                if not, raises an error
+                change this to false if wanting to perform auto-regressive forecasts only
+        """
+        self.name = str(self.name) if not isinstance(self.name,str) else self.name
+        self.y = list(self.y) if not isinstance(self.y,list) else self.y
+        self.current_dates = list(self.current_dates) if not isinstance(self.current_dates,list) else self.current_dates
+        self.future_dates = list(self.future_dates) if not isinstance(self.future_dates,list) else self.future_dates
+        self.forecast_out_periods = int(self.forecast_out_periods)
+        if check_xreg:
+            assert isinstance(self.current_xreg,dict)
+            assert isinstance(self.future_xreg,dict)
+        
     def check_xreg_future_current_consistency(self):
         """ checks that the self.y is same size as self.current_dates
             checks that self.y is same size as the values in self.current_xreg
@@ -416,7 +436,7 @@ class Forecaster:
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
-            data <- read.csv('tmp_data_externals/tmp_r_current.csv')
+            data <- read.csv('tmp/tmp_r_current.csv')
             data_train <- data[1:(nrow(data)-{test_length}),]
             data_test <- data[(nrow(data)-{test_length} + 1):nrow(data),]
             
@@ -427,7 +447,7 @@ class Forecaster:
             """)
         ro.r("""
             if (ncol(data) > 1){
-                future_externals = read.csv('tmp_data_externals/tmp_r_future.csv')
+                future_externals = read.csv('tmp/tmp_r_future.csv')
                 externals = names(data)[2:ncol(data)]
                 xreg_c <- as.matrix(data[,externals])
                 xreg_tr <- as.matrix(data_train[,externals])
@@ -449,7 +469,7 @@ class Forecaster:
                                 forecast=p)
             write$APE <- abs(write$actual - write$forecast) / write$actual
             write$model_form <- arima_form
-            write.csv(write,'tmp_data_externals/tmp_test_results.csv',row.names=F)
+            write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
         """)
         
         ro.r(f"""
@@ -461,10 +481,10 @@ class Forecaster:
             write <- data.frame(forecast=p)
             write$expected_mape <- mape
             write$model_form <- arima_form
-            write.csv(write,'tmp_data_externals/tmp_forecast.csv',row.names=F)
+            write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
         """)
-        tmp_test_results = pd.read_csv('tmp_data_externals/tmp_test_results.csv')
-        tmp_forecast = pd.read_csv('tmp_data_externals/tmp_forecast.csv')
+        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
         self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = list(tmp_forecast['forecast'])
         
@@ -507,7 +527,7 @@ class Forecaster:
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
-            data <- read.csv('tmp_data_externals/tmp_r_current.csv')
+            data <- read.csv('tmp/tmp_r_current.csv')
 
             y <- data$y
             y_train <- y[1:(nrow(data)-{test_length})]
@@ -523,7 +543,7 @@ class Forecaster:
                                 forecast=p)
             write$APE <- abs(write$actual - write$forecast) / write$actual
             write$model_form <- tbats_form
-            write.csv(write,'tmp_data_externals/tmp_test_results.csv',row.names=F)
+            write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
 
             ar <- tbats(y)
             f <- forecast(ar,xreg=xreg_f,h={self.forecast_out_periods})
@@ -533,10 +553,82 @@ class Forecaster:
             write <- data.frame(forecast=p)
             write$expected_mape <- mape
             write$model_form <- tbats_form
-            write.csv(write,'tmp_data_externals/tmp_forecast.csv',row.names=F)
+            write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
         """)
-        tmp_test_results = pd.read_csv('tmp_data_externals/tmp_test_results.csv')
-        tmp_forecast = pd.read_csv('tmp_data_externals/tmp_forecast.csv')
+        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+        self.mape[call_me] = tmp_test_results['APE'].mean()
+        self.forecasts[call_me] = list(tmp_forecast['forecast'])
+        
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
+        self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
+        self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
+        self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+
+    def forecast_ets(self,test_length=1,Xvars='all',call_me='ets'):
+        """ forecasts using ets from the forecast package in R
+            evaluates the period MAPE with MLmetrics
+            the following information is stored:
+                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
+                    the nested dictionary has the following keys:
+                        'holdout_period' : int - the number of periods held out in the test set
+                        'model_form' : str - the final evaluated arima form to create the forecast (defined as the forecast()[[1]] element from the forecast package)
+                        'test_set_actuals' : list - the actual y figures from the test set
+                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
+                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
+                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
+                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
+                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
+            Parameters: test_length : int, default 1
+                            the number of periods to holdout in order to test the model
+                            must be at least 1
+                        call_me : str, default "ets"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+        """
+        if isinstance(Xvars,str):
+            if Xvars.startswith('top_'):
+                top_xreg = int(Xvars.split('_')[1])
+                if top_xreg == 0:
+                    Xvars = None
+                else:
+                    self.set_ordered_xreg(chop_tail_periods=test_length) # have to reset here for differing test lengths in other models
+                    Xvars = self.ordered_xreg[:top_xreg]
+        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self._prepr('MLmetrics','forecast',write_Xvars=None)
+        ro.r(f"""
+            rm(list=ls())
+            setwd('{rwd}')
+            data <- read.csv('tmp/tmp_r_current.csv')
+
+            y <- data$y
+            y_train <- y[1:(nrow(data)-{test_length})]
+            y_test <- y[(nrow(data)-{test_length} + 1):nrow(data)]
+        
+            ar <- ets(y_train)
+            f <- forecast(ar,xreg=xreg_te,h=length(y_test))
+            # f[[2]] are point estimates, f[[9]] is the TBATS form
+            p <- f[[2]]
+            ets_form <- f[[8]]
+            mape <- MLmetrics::MAPE(p,y_test)
+            write <- data.frame(actual=y_test,
+                                forecast=p)
+            write$APE <- abs(write$actual - write$forecast) / write$actual
+            write$model_form <- ets_form
+            write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+
+            ar <- ets(y)
+            f <- forecast(ar,xreg=xreg_f,h={self.forecast_out_periods})
+            p <- f[[2]]
+            ets_form <- f[[8]]
+            
+            write <- data.frame(forecast=p)
+            write$expected_mape <- mape
+            write$model_form <- ets_form
+            write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+        """)
+        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
         self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = list(tmp_forecast['forecast'])
         
@@ -579,7 +671,7 @@ class Forecaster:
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = RandomForestRegressor(**hyper_params,random_state=20)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
-        self._set_remaining_info(call_me,test_length,'Random Forest',str(hyper_params))
+        self._set_remaining_info(call_me,test_length,'Random Forest - {}'.format(hyper_params))
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
@@ -616,7 +708,7 @@ class Forecaster:
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = GradientBoostingRegressor(**hyper_params,random_state=20)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
-        self._set_remaining_info(call_me,test_length,'Gradient Boosted Trees',str(hyper_params))
+        self._set_remaining_info(call_me,test_length,'Gradient Boosted Trees - {}'.format(hyper_params))
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
@@ -653,7 +745,7 @@ class Forecaster:
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = AdaBoostRegressor(**hyper_params,random_state=20)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
-        self._set_remaining_info(call_me,test_length,'Ada Boosted Trees',str(hyper_params))
+        self._set_remaining_info(call_me,test_length,'Ada Boosted Trees - {}'.format(hyper_params))
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
@@ -690,7 +782,7 @@ class Forecaster:
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = MLPRegressor(**hyper_params,random_state=20)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
-        self._set_remaining_info(call_me,test_length,'Multi Level Perceptron',str(hyper_params))
+        self._set_remaining_info(call_me,test_length,'Multi Level Perceptron - {}'.format(hyper_params))
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
@@ -724,7 +816,7 @@ class Forecaster:
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = LinearRegression()
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
-        self._set_remaining_info(call_me,test_length,'Multi Linear Regression','')
+        self._set_remaining_info(call_me,test_length,'Multi Linear Regression')
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
@@ -761,7 +853,7 @@ class Forecaster:
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = Ridge(alpha=alpha)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
-        self._set_remaining_info(call_me,test_length,'Ridge',str(alpha))
+        self._set_remaining_info(call_me,test_length,'Ridge - {}'.format(alpha))
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
@@ -798,7 +890,7 @@ class Forecaster:
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = Lasso(alpha=alpha)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
-        self._set_remaining_info(call_me,test_length,'Lasso',str(alpha))
+        self._set_remaining_info(call_me,test_length,'Lasso - {}'.format(alpha))
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
@@ -835,7 +927,7 @@ class Forecaster:
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = SVR(**hyper_params)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
-        self._set_remaining_info(call_me,test_length,'Support Vector Regressor',str(hyper_params))
+        self._set_remaining_info(call_me,test_length,'Support Vector Regressor - {}'.format(hyper_params))
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
