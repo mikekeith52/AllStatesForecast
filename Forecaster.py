@@ -140,7 +140,7 @@ class Forecaster:
         from rpy2.robjects.packages import importr
         for lib in args:
             try:  importr(lib)
-            except ro.packages.PackageNotInstalledError: ro.r(f'install.packages("{lib}")') ; importr(lib)
+            except: ro.r(f'install.packages("{lib}")') ; importr(lib)
         current_df = pd.DataFrame(self.current_xreg)
         current_df['y'] = self.y
 
