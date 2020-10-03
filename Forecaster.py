@@ -37,7 +37,10 @@ class Forecaster:
     def forecast_arima(self):
         pass
 
-    def forecast_mlp(self):
+    def forecast_rf(self):
+        pass
+
+    def forecast_average(self):
         pass
 
     def set_best_model(self):
