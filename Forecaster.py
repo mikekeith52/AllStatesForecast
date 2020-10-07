@@ -6,11 +6,12 @@ from collections import Counter
 from scipy.stats import pearsonr
 import rpy2.robjects as ro
 
+# make the working directory friendly for R
 rwd = os.getcwd().replace('\\','/')
 
 class Forecaster:
     """ object to forecast time series data
-        natively supports the extraction of FRED data, could be expanded to finance data with few adjustments
+        natively supports the extraction of FRED data, could be expanded to other APIs with few adjustments
         The following models are currently supported:
             random forest (sklearn)
             adaboost (sklearn)
@@ -22,12 +23,33 @@ class Forecaster:
             multi level perceptron (sklearn)
             arima (R forecast pkg: auto.arima with or without external regressors)
             tbats (R forecast pkg: tbats)
+            ets (R forecast pkg: ets)
+            vecm (R tsDyn pkg: VECM)
             average (any number of models can be averaged)
+            naive (propogates final observed value forward)
+        more models can be added by building more methods
+
+        for every evaluated model, the following information is stored in the object attributes:
+            in self.info (dict), a key is added as the model name and a nested dictionary as the value
+                    the nested dictionary has the following keys:
+                        'holdout_periods' : int - the number of periods held out in the test set
+                        'model_form' : str - the name of the model with any hyperparameters, external regressors, etc
+                        'test_set_actuals' : list - the actual figures from the test set
+                        'test_set_predictions' : list - the predicted figures from the test set evaluated with a model of the training set
+                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
+                in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
+                in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
+                in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features
+                    if it is an sklearn model, it will be permutation feature importance
+                    if it is an R model, it will be Pearson correlation coefficients and p-values
+                    if a given model uses no regressors, there will be no key added here for that model
+
         Author Michael Keith: mikekeith52@gmail.com
     """
     def __init__(self,name=None,y=None,current_dates=None,future_dates=None,
-                 current_xreg=None,future_xreg=None,forecast_out_periods=24):
-        """ Parameters: name : str
+                 current_xreg=None,future_xreg=None,forecast_out_periods=24,**kwargs):
+        """ You can load the object with data using __init__ or you can leave all default arguments and load the data with an attached API method (such as get_data_fred())
+            Parameters: name : str
                         y : list
                         current_dates : list
                             an ordered list of dates that correspond to the ordered values in self.y
@@ -37,7 +59,8 @@ class Forecaster:
                             dates must be a pandas datetime object (pd.to_datetime())
                         current_xreg : dict
                         future_xreg : dict
-                        forecast_out_periods : int, default 24
+                        forecast_out_periods : int, default length of future_dates or 24 if that is None
+                        **all keyword arguments become attributes
         """
         self.name = name
         self.y = y
@@ -45,14 +68,16 @@ class Forecaster:
         self.future_dates = future_dates
         self.current_xreg = current_xreg
         self.future_xreg = future_xreg
-        self.ordered_xreg = None
-        self.forecast_out_periods=forecast_out_periods
+        self.forecast_out_periods=forecast_out_periods if future_dates is None else len(future_dates)
         self.info = {}
         self.mape = {}
         self.forecasts = {}
         self.feature_importance = {}
-        self.ordered_xreg = []
+        self.ordered_xreg = None
         self.best_model = ''
+
+        for key, value in kwargs.items():
+            setattr(self,key,value)
 
     def _score_and_forecast(self,call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars):
         """ scores a model on a test test
@@ -67,9 +92,7 @@ class Forecaster:
                         y_train : pd.Series
                         X_test : pd.core.frame.DataFrame
                         y_test : pd.Series
-                        Xvars : list or any other data type
-                            the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                        Xvars : list or str
         """
         regr.fit(X_train,y_train)
         pred = regr.predict(X_test)
@@ -98,9 +121,9 @@ class Forecaster:
             only works within an sklearn forecast method
             Parameters: test_length : int,
                             the length of the resulting test_set
-                        Xvars : list or any other data type, default "all"
+                        Xvars : list or str, default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is not a list, it is assumed that all variables are wanted
+                            if it is a str, must be "all"
         """
         from sklearn.model_selection import train_test_split
         X = pd.DataFrame(self.current_xreg)
@@ -124,40 +147,65 @@ class Forecaster:
         import eli5
         from eli5.sklearn import PermutationImportance
         perm = PermutationImportance(regr).fit(X,y)
-        weights_df = eli5.explain_weights_df(perm,feature_names=X.columns.tolist())
+        weights_df = eli5.explain_weights_df(perm,feature_names=X.columns.tolist()).set_index('feature')
         return weights_df
 
-    def _prepr(self,*args,write_Xvars='all'):
+    def _prepr(self,*libs,test_length,call_me,Xvars):
         """ prepares the R environment by importing/installing libraries and writing out csv files (current/future datasets) to tmp folder
             file names: tmp_r_current.csv, tmp_r_future.csv
-            args are libs to import and/or install from R
-            Parameters: args : str
+            libs are libs to import and/or install from R
+            Parameters: call_me : str
+                        Xvars : list or str, default "all"
+                        *libs : str
                             library names to import into the R environment
                             if library name not found, will attempt to install (you will need to specify a CRAN mirror in a pop-up box)
-                        write_Xvars : str or list, if str must be "all", default "all"
-                            Xvars to write to the tmp folder in the csv files
         """
         from rpy2.robjects.packages import importr
-        for lib in args:
+
+        if isinstance(Xvars,str):
+            if Xvars.startswith('top_'):
+                top_xreg = int(Xvars.split('_')[1])
+                if top_xreg == 0:
+                    Xvars = None
+                else:
+                    self.set_ordered_xreg(chop_tail_periods=test_length) # have to reset here for differing test lengths in other models
+                    if top_xreg > len(self.ordered_xreg):
+                        Xvars = self.ordered_xreg.copy()
+                    else:
+                        Xvars = self.ordered_xreg[:top_xreg]
+            elif Xvars == 'all':
+                Xvars = list(self.current_xreg.keys())
+            else:
+                print(f'Xvars argument not recognized: {Xvars}, changing to None')
+                Xvars = None
+
+        if not Xvars is None:
+            feature_importance_df = pd.DataFrame(index=Xvars.copy(),columns=['PearsonR','Pval'])
+            for x in Xvars:
+                # maybe this isn't the best way to do it, but it makes controlling for stationarity straightforward
+                feature_importance_df.loc[x,['PearsonR','Pval']] = pearsonr(np.diff(np.log(self.current_xreg[x])) if min(self.current_xreg[x]) > 0 else self.current_xreg[x][1:],
+                                                                            np.diff(np.log(self.y)) if min(self.y) > 0 else self.y[1:])
+            self.feature_importance[call_me] = feature_importance_df.sort_values('Pval')
+
+        for lib in libs:
             try:  importr(lib)
             except: ro.r(f'install.packages("{lib}")') ; importr(lib)
         current_df = pd.DataFrame(self.current_xreg)
         current_df['y'] = self.y
 
-        if isinstance(write_Xvars,list):
-            current_df = current_df[['y'] + write_Xvars]
-        elif write_Xvars is None:
+        if isinstance(Xvars,list):
+            current_df = current_df[['y'] + Xvars]
+        elif Xvars is None:
             current_df = current_df['y']
-        elif write_Xvars != 'all':
-            print(f'unknown argument passed to write_Xvars: {write_Xvars}')
-            return None
+        elif Xvars != 'all':
+           raise ValueError(f'unknown argument passed to Xvars: {Xvars}')
 
         if 'tmp' not in os.listdir():
             os.mkdir('tmp')
 
         current_df.to_csv(f'tmp/tmp_r_current.csv',index=False)
         
-        if not write_Xvars is None:
+        if not Xvars is None:
             future_df = pd.DataFrame(self.future_xreg)
             future_df.to_csv(f'tmp/tmp_r_future.csv',index=False)
 
@@ -175,9 +223,9 @@ class Forecaster:
         self.y = list(df[series])
         self.current_dates = list(pd.to_datetime(df.index))
 
-    def process_xreg_df(self,xreg_df,date_col=None,process_missing='remove'):
+    def process_xreg_df(self,xreg_df,date_col=None,remove_rows_with_missing_data=False,process_missing_columns=False):
         """ takes a dataframe of external regressors
-            any non-numeric data will be made into a 0/1 binary variable (using pd.get_dummies())
+            any non-numeric data will be made into a 0/1 binary variable (using pd.get_dummies(drop_first=True))
             deals with columns with missing data
             eliminates rows that don't correspond with self.y's timeframe
             splits values between the future and current xregs
@@ -191,12 +239,14 @@ class Forecaster:
                             if None, assumes none of the columns are dates (if this is not the case, can cause bad results)
                             if None, assumes all dataframe obs start at the same time as self.y
                             if str, will use that column to resize the dataset to line up with self.current_dates and all future obs stored in self.future_xreg and self.future_dates
-                        process_missing : str or dict,
-                                          if str, one of 'remove','impute_mean','impute_median','impute_mode','forward_fill','backward_fill','impute_w_nearest_neighbors'; default 'remove'
-                                          if dict, key is a column name and value is one of 'remove','impute_mean','impute_median','impute_mode','forward_fill','backward_fill','impute_w_nearest_neighbors'
-                                          if str, one method applied to all columns
-                                          if dict, the selected methods only apply to column names in the dictionary
-                                          note when using dict, all columns with missing data not in dict will be removed
+                        remove_rows_with_missing_data : bool, default False
+                        process_missing_columns : str, dict, or bool
+                            how to process columns with missing data
+                            if str, one of 'remove','impute_mean','impute_median','impute_mode','forward_fill','backward_fill','impute_w_nearest_neighbors'
+                            if dict, key is a column name and value is one of 'remove','impute_mean','impute_median','impute_mode','forward_fill','backward_fill','impute_w_nearest_neighbors'
+                            if str, one method applied to all columns
+                            if dict, the selected methods only apply to column names in the dictionary
+                            if bool, only False supported -- False means this will be ignored, any unsupported argument raises a value error
         """
         def _remove_(c):
             xreg_df.drop(columns=c,inplace=True)
@@ -230,53 +280,54 @@ class Forecaster:
             xreg_df = xreg_df.loc[xreg_df[date_col] >= self.current_dates[0]]
         xreg_df = pd.get_dummies(xreg_df,drop_first=True)
 
-        if isinstance(process_missing,dict):
-            for c, v in process_missing.items():
-                if (v == 'remove') & (xreg_df[c].isnull().sum() > 0):
-                    _remove_(c)
-                elif v == 'impute_mean':
-                    _impute_mean_(c)
-                elif v == 'impute_median':
-                    _impute_median_(c)
-                elif v == 'impute_mode':
-                    _impute_mode_(c)
-                elif v == 'forward_fill':
-                    _forward_fill_(c)
-                elif v == 'backward_fill':
-                    _backward_fill_(c)
-                elif v == 'impute_w_nearest_neighbors':
-                    _impute_w_nearest_neighbors_(c)
-                else:
-                    print(f'argument {process_missing} not supported')
-            remaining_c = [c for c in xreg_df if c not in process_missing.keys()]
-            for c in remaining_c:
-                if xreg_df[c].isnull().sum() > 0:
-                    _remove_(c)
+        if remove_rows_with_missing_data:
+            xreg_df.dropna(inplace=True)
 
-        elif isinstance(process_missing,str):
-            for c in xreg_df:
-                if xreg_df[c].isnull().sum() > 0:
-                    if process_missing == 'remove':
+        if not not process_missing_columns:
+            if isinstance(process_missing_columns,dict):
+                for c, v in process_missing_columns.items():
+                    if (v == 'remove') & (xreg_df[c].isnull().sum() > 0):
                         _remove_(c)
-                    elif prcoess_missing == 'impute_mean':
+                    elif v == 'impute_mean':
                         _impute_mean_(c)
-                    elif prcoess_missing == 'impute_median':
+                    elif v == 'impute_median':
                         _impute_median_(c)
-                    elif prcoess_missing == 'impute_mode':
+                    elif v == 'impute_mode':
                         _impute_mode_(c)
-                    elif prcoess_missing == 'forward_fill':
+                    elif v == 'forward_fill':
                         _forward_fill_(c)
-                    elif prcoess_missing == 'backward_fill':
+                    elif v == 'backward_fill':
                         _backward_fill_(c)
-                    elif prcoess_missing == 'impute_w_nearest_neighbors':
+                    elif v == 'impute_w_nearest_neighbors':
                         _impute_w_nearest_neighbors_(c)
                     else:
-                        print(f'argument {process_missing} not supported')
-                        return None
+                        raise ValueError(f'argument {v} not supported for columns {c}, ignoring')
+
+            elif isinstance(process_missing_columns,str):
+                for c in xreg_df:
+                    if xreg_df[c].isnull().sum() > 0:
+                        if process_missing_columns == 'remove':
+                            _remove_(c)
+                        elif process_missing_columns == 'impute_mean':
+                            _impute_mean_(c)
+                        elif process_missing_columns == 'impute_median':
+                            _impute_median_(c)
+                        elif process_missing_columns == 'impute_mode':
+                            _impute_mode_(c)
+                        elif process_missing_columns == 'forward_fill':
+                            _forward_fill_(c)
+                        elif process_missing_columns == 'backward_fill':
+                            _backward_fill_(c)
+                        elif process_missing_columns == 'impute_w_nearest_neighbors':
+                            _impute_w_nearest_neighbors_(c)
+                        else:
+                            raise ValueError(f'argument {process_missing} not supported, ignoring')
+            else:
+                raise ValueError(f'argument {process_missing} not supported, ignoring')
 
         if not date_col is None:
             current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
-            future_xreg_df = xreg_df.loc[~xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)        
+            future_xreg_df = xreg_df.loc[xreg_df[date_col] > self.current_dates[-1]].drop(columns=date_col)        
         else:
             current_xreg_df = xreg_df.iloc[:len(self.y)]
             future_xreg_df = xreg_df.iloc[len(self.y):]
@@ -292,11 +343,10 @@ class Forecaster:
 
     def set_and_check_data_types(self,check_xreg=True):
         """ changes all attributes in self to lists, dicts, strs, or whatever makes it easier for the program to work with with no errors
-            if a conversion to these types is unsuccessfully, will raise an error
+            if a conversion to these types is unsuccessful, will raise an error
             Parameters: check_xreg : bool, default True
-                if True, checks that self.current_xreg and self.future_xregs are dict types
-                if not, raises an error
-                change this to false if wanting to perform auto-regressive forecasts only
+                if True, checks that self.current_xreg and self.future_xregs are dict types (raises an error if check fails)
+                change this to False if wanting to perform auto-regressive forecasts only
         """
         self.name = str(self.name) if not isinstance(self.name,str) else self.name
         self.y = list(self.y) if not isinstance(self.y,list) else self.y
@@ -326,14 +376,17 @@ class Forecaster:
                 if this is a larger value than the size of self.future_dates, some models may fail
         """
         if isinstance(n,int):
-            self.forecast_out_periods = n
-            if isinstance(self.future_dates,list):
-                self.future_dates = self.future_dates[:n]
-            if isinstance(self.future_xreg,dict):
-                for k,v in self.future_xreg.items():
-                    self.future_xreg[k] = v[:n]
+            if n >= 1:
+                self.forecast_out_periods = n
+                if isinstance(self.future_dates,list):
+                    self.future_dates = self.future_dates[:n]
+                if isinstance(self.future_xreg,dict):
+                    for k,v in self.future_xreg.items():
+                        self.future_xreg[k] = v[:n]
+            else:
+              raise ValueError('n must be an int type greater than 1')  
         else:
-            print('n must be an int type')
+            raise ValueError('n must be an int type greater than 1')
 
     def set_ordered_xreg(self,chop_tail_periods=0,include_only='all',exclude=None,quiet=True):
         """ method for ordering stored externals from most to least correlated, according to absolute Pearson correlation coefficient value
@@ -354,7 +407,7 @@ class Forecaster:
                             note: is possible for include_only to be its default value, "all", and exclude to not be ignored if it is passed as a list type
                         quiet : bool or any other data type, default True
                             if this is True, then if a given external is ignored (either because no correlation could be calculated or there are no observations after its tail has been chopped), you will not know
-                            if this is not Ture, then if a given external is ignored, it will print which external is being skipped
+                            if this is not True, then if a given external is ignored, it will print which external is being skipped
         """
         def log_diff(x):
             """ returns the logged difference of an array
@@ -402,37 +455,25 @@ class Forecaster:
 
     def forecast_arima(self,test_length=1,Xvars='all',call_me='arima'):
         """ forecasts using auto.arima from the forecast package in R
-            evaluates the period MAPE with MLmetrics
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_period' : int - the number of periods held out in the test set
-                        'model_form' : str - the final evaluated arima form to create the forecast (defined as the forecast()[[1]] element from the forecast package)
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
-                            must be at least 1
+                            must be at least 1 (AssertionError raised if not)
                         Xvars : list or any other data type, default "all"
                             the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                            if it is a list, will attempt to estimate a model with that list of Xvars
+                            if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
+                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
+                            if it is "all", will attempt to estimate a model with all available x regressors
+                            because the auto.arima function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
+                            if no arima model can be etimated, will raise an error
                         call_me : str, default "arima"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
-        if isinstance(Xvars,str):
-            if Xvars.startswith('top_'):
-                top_xreg = int(Xvars.split('_')[1])
-                if top_xreg == 0:
-                    Xvars = None
-                else:
-                    self.set_ordered_xreg(chop_tail_periods=test_length) # have to reset here for differing test lengths in other models
-                    Xvars = self.ordered_xreg[:top_xreg]
+        assert isinstance(test_length,int)
+        assert test_length >= 1
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
-        self._prepr('MLmetrics','forecast',write_Xvars=Xvars)
+        self._prepr('MLmetrics','forecast',test_length=test_length,call_me=call_me,Xvars=Xvars)
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
@@ -494,36 +535,19 @@ class Forecaster:
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
 
-    def forecast_tbats(self,test_length=1,Xvars='all',call_me='tbats'):
+    def forecast_tbats(self,test_length=1,call_me='tbats'):
         """ forecasts using tbats from the forecast package in R
-            evaluates the period MAPE with MLmetrics
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_period' : int - the number of periods held out in the test set
-                        'model_form' : str - the final evaluated arima form to create the forecast (defined as the forecast()[[1]] element from the forecast package)
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
-                            must be at least 1
+                            must be at least 1 (AssertionError raised if not)
                         call_me : str, default "tbats"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
-        if isinstance(Xvars,str):
-            if Xvars.startswith('top_'):
-                top_xreg = int(Xvars.split('_')[1])
-                if top_xreg == 0:
-                    Xvars = None
-                else:
-                    self.set_ordered_xreg(chop_tail_periods=test_length) # have to reset here for differing test lengths in other models
-                    Xvars = self.ordered_xreg[:top_xreg]
+        assert isinstance(test_length,int)
+        assert test_length >= 1
+
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
-        self._prepr('MLmetrics','forecast',write_Xvars=None)
+        self._prepr('MLmetrics','forecast',test_length=test_length,call_me=call_me,Xvars=None)
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
@@ -566,36 +590,19 @@ class Forecaster:
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
 
-    def forecast_ets(self,test_length=1,Xvars='all',call_me='ets'):
+    def forecast_ets(self,test_length=1,call_me='ets'):
         """ forecasts using ets from the forecast package in R
-            evaluates the period MAPE with MLmetrics
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_period' : int - the number of periods held out in the test set
-                        'model_form' : str - the final evaluated arima form to create the forecast (defined as the forecast()[[1]] element from the forecast package)
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
-                            must be at least 1
+                            must be at least 1 (AssertionError raised if not)
                         call_me : str, default "ets"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
-        if isinstance(Xvars,str):
-            if Xvars.startswith('top_'):
-                top_xreg = int(Xvars.split('_')[1])
-                if top_xreg == 0:
-                    Xvars = None
-                else:
-                    self.set_ordered_xreg(chop_tail_periods=test_length) # have to reset here for differing test lengths in other models
-                    Xvars = self.ordered_xreg[:top_xreg]
+        assert isinstance(test_length,int)
+        assert test_length >= 1
+
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
-        self._prepr('MLmetrics','forecast',write_Xvars=None)
+        self._prepr('MLmetrics','forecast',test_length=test_length,call_me=call_me,Xvars=None)
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
@@ -638,34 +645,222 @@ class Forecaster:
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
 
-    def forecast_rf(self,test_length=1,Xvars='all',call_me='rf',hyper_params={},set_feature_importance=True):
-        """ forecasts the stored y variable with a random forest from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html)
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_periods' : int - the number of periods held out in the test set
-                        'model_form' : str - the name of the model (Random Forest) and any user-specified hyperparameters if different from the default setting from sklearn
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
-            Parameters: test_length : int, default 1
-                            the length of the resulting test_set
+    def forecast_vecm(self,*cids,r=1,test_length=1,max_lags=6,Xvars='all',call_me='vecm',optimizer='AIC',max_externals=None):
+        """ forecasts using VECM from the tsDyn package in R
+            Optimizes the final model with different lags, time trends, constants, and x variables by minimizing the AIC or BIC in the training set
+            Parameters: cids*
+                            lists of cointegrated data
+                            there must be at least one list passed (cids cannot be empty)
+                            each list must be the same size as self.y
+                            if this is only one list, it must be cointegrated with self.y
+                            if more than 1 list, there must be at least 1 cointegrated pair between cids* and self.y (to fulfill the requirements of VECM)
+                        r : int, default 1
+                            the number of total cointegrated relationships between self.y and *cids
+                            if not an int or less than 1, an AssertionError is raised
+                        test_length : int, default 1
+                            the number of periods to hold out in order to test the model
+                            must be at least 1 (AssertionError raised if not)
+                        max_lags : int, default 6
+                            the total number of lags that will be used in the optimization process
+                            1 to this number will be attempted
+                            if not an int or less than 0, an AssertionError is raised
                         Xvars : list or any other data type, default "all"
                             the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                            if it is a list, will attempt to estimate a model with that list of Xvars
+                            if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
+                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
+                            if it is "all", will attempt to estimate a model with all available x regressors
+                            because the VBECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
+                        call_me : str, default "vecm"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        optimizer : str, one of "AIC","BIC"; default "AIC"
+                            the information criteria used to select the best model in the optimization grid
+                            a good, short resource to understand the difference: https://www.methodology.psu.edu/resources/AIC-vs-BIC/
+                        max_externals: int or None type, default None
+                            the maximum number of externals to try in each model iteration
+                            0 to this value of externals will be attempted and every combination of externals will be tried
+                            None signifies that all combinations will be tried
+                            reducing this from None can speed up processing and reduce overfitting
+        """
+        if len(cids) == 0:
+            raise ValueError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids')
+        for cid in cids:
+            if not isinstance(cid,list):
+                raise TypeError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids')
+            elif len(cid) != len(self.y):
+                raise ValueError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids')
+
+        assert isinstance(r,int)
+        assert r >= 1
+        assert isinstance(test_length,int)
+        assert test_length >= 1
+        assert isinstance(max_lags,int)
+        assert max_lags >= 0
+
+        if optimizer not in ['AIC','BIC']:
+            raise ValueError(f'cannot estimate model - optimizer value of {optimizer} not recognized')
+
+        if max_externals is None:
+            if isinstance(Xvars,list):
+                max_externals = len(Xvars)
+            elif Xvars == 'all':
+                max_externals = len(self.current_xreg.keys())
+            elif Xvars.startswith('top_'):
+                max_externals = int(Xvars.split('_')[1])
+            else:
+                raise ValueError(f'Xvars argument {Xvars} not recognized')
+
+        self._prepr('MLmetrics','tsDyn',test_length=test_length,call_me=call_me,Xvars=Xvars)
+        cid_df = pd.DataFrame()
+        for i, cid in enumerate(cids):
+            cid_df[f'cid{i+1}'] = cid
+
+        cid_df.to_csv('tmp/tmp_r_cid.csv',index=False)
+        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+
+        ro.r(f"""
+                rm(list=ls())
+                setwd('{rwd}')
+                data <- read.csv('tmp/tmp_r_current.csv')
+                cid <- read.csv('tmp/tmp_r_cid.csv')
+                test_periods <- {test_length}
+                r <- {r}
+                IC <- {optimizer}
+                max_ext <- {max_externals}
+                max_lags <- {max_lags}
+            """)
+
+        ro.r("""
+                if (ncol(data) > 1){
+                    exogen_names <- names(data)[2:ncol(data)]
+                    exogen_future <- read.csv('tmp/tmp_r_future.csv')
+                    exogen_train <- data[1:(nrow(data)-test_periods),names(data)[2:ncol(data)]]
+                    exogen_test <- data[(nrow(data)-(test_periods-1)):nrow(data),names(data)[2:ncol(data)]]
+
+                    # every combination of the external regressors, including no external regressors
+                    exogenstg1 <- list()
+                    for (i in 1:length(exogen_names)){
+                      exogenstg1[[i]] <- combn(exogen_names,i)
+                    }
+
+                    h <- 2
+                    exogen <- list(NULL)
+                    for (i in 1:min(max_ext,length(exogenstg1))) {
+                      for (j in 1:ncol(exogenstg1[[i]])) {
+                        exogen[[h]] <- exogenstg1[[i]][,j]
+                        h <- h+1
+                      }
+                    }
+                    exogen_train <- data[1:(nrow(data)-test_periods),names(data)[2:ncol(data)]]
+                    exogen_test <- data[(nrow(data)-(test_periods-1)):nrow(data),names(data)[2:ncol(data)]]
+                } else {
+                    exogen <- list(NULL)
+                }
+                
+                data.ts <- cbind(data[[1]],cid)
+                data.ts_train <- data.ts[1:(nrow(data)-test_periods),]
+                data.ts_test <- data.ts[(nrow(data)-(test_periods-1)):nrow(data),]
+
+                # create a grid of parameters for the best estimator for each series pair
+                lags = seq(1,max_lags)
+                include = c('none','const','trend','both')
+                estim = c('2OLS','ML')
+
+                grid <- expand.grid(lags = lags, include = include, estim = estim, exogen=exogen)
+                grid$ic <- 999999
+
+                for (i in 1:nrow(grid)){
+                  if (is.null(grid[i,'exogen'][[1]])){
+                    ex_train = NULL
+                  } else {
+                    ex_train = exogen_train[,grid[i,'exogen'][[1]]]
+                  }
+
+                  vc_train <- VECM(data.ts_train,
+                                  r=r,
+                                  lag=grid[i,'lags'],
+                                  include = as.character(grid[i,'include']),
+                                  estim = as.character(grid[i,'estim']),
+                                  exogen=ex_train)
+                  grid[i,'ic'] <-  IC(vc_train)
+                }
+
+                # choose parameters where MAPE is smallest
+                best_params <- grid[grid$ic == min(grid$ic),]
+
+                # set externals
+                if (is.null(best_params[1,'exogen'][[1]])){
+                  ex_current = NULL
+                  ex_future = NULL
+                  ex_train = NULL
+                  ex_test = NULL
+
+                } else {
+                  ex_current = data[,best_params[1,'exogen'][[1]]]
+                  ex_future = exogen_future[,best_params[1,'exogen'][[1]]]
+                  ex_train = exogen_train[,best_params[1,'exogen'][[1]]]
+                  ex_test = exogen_test[,best_params[1,'exogen'][[1]]]
+                }
+                
+                # predict on test set one more time with best parameters for model accuracy info
+                vc_train <- VECM(data.ts_train,
+                                  r=r,
+                                  lag=best_params[1,'lags'],
+                                  include = as.character(best_params[1,'include']),
+                                  estim = as.character(best_params[1,'estim']),
+                                  exogen=ex_train)
+                p <- as.data.frame(predict(vc_train,n.ahead=test_periods,exoPred=ex_test))
+                p$model_form <- paste('VECM',best_params[1,'lags'],'lags',best_params[1,'estim'],best_params[1,'include'],'Externals:',as.character(best_params[1,'exogen'])[[1]])
+
+                write.csv(p,'tmp/tmp_test_results.csv',row.names=F)
+
+                # train the final model on full dataset with best parameter values
+                vc.out = VECM(data.ts,
+                              r=r,
+                              lag=best_params[1,'lags'],
+                              include = as.character(best_params[1,'include']),
+                              estim = as.character(best_params[1,'estim']),
+                              exogen=ex_current
+                )
+
+                # make the forecast
+                f <- as.data.frame(predict(vc.out,n.ahead=nrow(exogen_future),exoPred=ex_future))
+                # write final forecast values
+                write.csv(f,'tmp/tmp_forecast.csv',row.names=F)
+        """)
+
+        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['test_set_predictions'] = list(tmp_test_results.iloc[:,0])
+        self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
+        self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / y for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
+        self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
+        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self.forecasts[call_me] = list(tmp_forecast.iloc[:,0])
+
+    def forecast_rf(self,test_length=1,Xvars='all',call_me='rf',hyper_params={},set_feature_importance=True):
+        """ forecasts the stored y variable with a random forest from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html)
+            Parameters: test_length : int, default 1
+                            the length of the resulting test_set
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or str, default "all"
+                            the independent variables to use in the resulting X dataframes
+                            if it is a str, must be "all"
                         call_me : str, default "rf"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-                        hyper_params : dict; default {}
+                        hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
                             passed as an argment collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
-                            if True, adds a key to self.feature_importancere with the call_me parameter as a key
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        assert isinstance(test_length,int)
+        assert test_length >= 1
         from sklearn.ensemble import RandomForestRegressor
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
@@ -677,32 +872,24 @@ class Forecaster:
 
     def forecast_gbt(self,test_length=1,Xvars='all',call_me='gbt',hyper_params={},set_feature_importance=True):
         """ forecasts the stored y variable with a gradient boosting regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingRegressor.html)
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_periods' : int - the number of periods held out in the test set
-                        'model_form' : str - the name of the model (Random Forest) and any user-specified hyperparameters if different from the default setting from sklearn
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
-                        Xvars : list or any other data type, default "all"
-                            the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or str, default "all"
+                            the independent variables to use in the resulting X dataframes
+                            if it is a str, must be "all"
                         call_me : str, default "rf"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-                        hyper_params : dict; default {}
+                        hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
                             passed as an argment collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
-                            if True, adds a key to self.feature_importancere with the call_me parameter as a key
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        assert isinstance(test_length,int)
+        assert test_length >= 1
         from sklearn.ensemble import GradientBoostingRegressor
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
@@ -714,32 +901,24 @@ class Forecaster:
 
     def forecast_adaboost(self,test_length=1,Xvars='all',call_me='adaboost',hyper_params={},set_feature_importance=True):
         """ forecasts the stored y variable with an ada boost regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.AdaBoostRegressor.html)
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_periods' : int - the number of periods held out in the test set
-                        'model_form' : str - the name of the model (Random Forest) and any user-specified hyperparameters if different from the default setting from sklearn
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
-                        Xvars : list or any other data type, default "all"
-                            the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or str, default "all"
+                            the independent variables to use in the resulting X dataframes
+                            if it is a str, must be "all"
                         call_me : str, default "rf"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-                        hyper_params : dict; default {}
+                        hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
                             passed as an argment collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
-                            if True, adds a key to self.feature_importancere with the call_me parameter as a key
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        assert isinstance(test_length,int)
+        assert test_length >= 1
         from sklearn.ensemble import AdaBoostRegressor
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
@@ -751,32 +930,24 @@ class Forecaster:
 
     def forecast_mlp(self,test_length=1,Xvars='all',call_me='mlp',hyper_params={},set_feature_importance=True):
         """ forecasts the stored y variable with a multi level perceptron neural network from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPRegressor.html)
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_periods' : int - the number of periods held out in the test set
-                        'model_form' : str - the name of the model (Multi Level Perceptron) and any user-specified hyperparameters if different from the default setting from sklearn
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
-                        Xvars : list or any other data type, default "all"
-                            the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or str, default "all"
+                            the independent variables to use in the resulting X dataframes
+                            if it is a str, must be "all"
                         call_me : str, default "mlp"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-                        hyper_params : dict; default {}
+                        hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
                             passed as an argment collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
-                            if True, adds a key to self.feature_importancere with the call_me parameter as a key
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        assert isinstance(test_length,int)
+        assert test_length >= 1
         from sklearn.neural_network import MLPRegressor
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
@@ -788,29 +959,21 @@ class Forecaster:
 
     def forecast_mlr(self,test_length=1,Xvars='all',call_me='mlr',set_feature_importance=True):
         """ forecasts the stored y variable with a multi linear regression from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LinearRegression.html)
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_periods' : int - the number of periods held out in the test set
-                        'model_form' : str - Multi Linear Regression
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
-                        Xvars : list or any other data type, default "all"
-                            the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or str, default "all"
+                            the independent variables to use in the resulting X dataframes
+                            if it is a str, must be "all"
                         call_me : str, default "mlr"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         set_feature_importance : bool or any other data type, default True
-                            if True, adds a key to self.feature_importancere with the call_me parameter as a key
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        assert isinstance(test_length,int)
+        assert test_length >= 1
         from sklearn.linear_model import LinearRegression
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
@@ -822,32 +985,24 @@ class Forecaster:
 
     def forecast_ridge(self,test_length=1,Xvars='all',call_me='ridge',alpha=1.0,set_feature_importance=True):
         """ forecasts the stored y variable with a ridge regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Ridge.html)
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_periods' : int - the number of periods held out in the test set
-                        'model_form' : str - the name of the model (Ridge) and any user-specified hyperparameters if different from the default setting from sklearn
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
-                        Xvars : list or any other data type, default "all"
-                            the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or str, default "all"
+                            the independent variables to use in the resulting X dataframes
+                            if it is a str, must be "all"
                         call_me : str, default "ridge"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         alpha : float, default 1.0
                             the desired alpha hyperparameter to pass to the sklearn model
                             1.0 is also the default in sklearn
                         set_feature_importance : bool or any other data type, default True
-                            if True, adds a key to self.feature_importancere with the call_me parameter as a key
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        assert isinstance(test_length,int)
+        assert test_length >= 1
         from sklearn.linear_model import Ridge
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
@@ -859,32 +1014,24 @@ class Forecaster:
 
     def forecast_lasso(self,test_length=1,Xvars='all',call_me='lasso',alpha=1.0,set_feature_importance=True):
         """ forecasts the stored y variable with a lasso regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Lasso.html)
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_periods' : int - the number of periods held out in the test set
-                        'model_form' : str - the name of the model (Lasso) and any user-specified hyperparameters if different from the default setting from sklearn
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
-                        Xvars : list or any other data type, default "all"
-                            the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or str, default "all"
+                            the independent variables to use in the resulting X dataframes
+                            if it is a str, must be "all"
                         call_me : str, default "lasso"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         alpha : float, default 1.0
                             the desired alpha hyperparameter to pass to the sklearn model
                             1.0 is also the default in sklearn
                         set_feature_importance : bool or any other data type, default True
-                            if True, adds a key to self.feature_importancere with the call_me parameter as a key
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        assert isinstance(test_length,int)
+        assert test_length >= 1
         from sklearn.linear_model import Lasso
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
@@ -896,32 +1043,24 @@ class Forecaster:
 
     def forecast_svr(self,test_length=1,Xvars='all',call_me='svr',hyper_params={},set_feature_importance=True):
         """ forecasts the stored y variable with a support vector regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVR.html)
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_periods' : int - the number of periods held out in the test set
-                        'model_form' : str - the name of the model (Support Vector Regressor) and any user-specified hyperparameters if different from the default setting from sklearn
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
-                in self.forecasts, a key is added as the model name (specified in call_me), and a list of forecasted figures as the value
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
-                        Xvars : list or any other data type, default "all"
-                            the independent variables used to make predictions
-                            if it is not a list, it is assumed that all variables are wanted
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or str, default "all"
+                            the independent variables to use in the resulting X dataframes
+                            if it is a str, must be "all"
                         call_me : str, default "mlp"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-                        hyper_params : dict; default {}
+                        hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
                             passed as an argment collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
-                            if True, adds a key to self.feature_importancere with the call_me parameter as a key
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        assert isinstance(test_length,int)
+        assert test_length >= 1
         from sklearn.svm import SVR
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
@@ -934,17 +1073,6 @@ class Forecaster:
 
     def forecast_average(self,models='all',call_me='average',test_length='max'):
         """ averages a set of models to make a new estimator
-            the following information is stored:
-                in self.info, a key is added as the model name (specified in call_me), and a nested dictionary as the value
-                    the nested dictionary has the following keys:
-                        'holdout_periods' : int - the number of periods held out in the test set
-                        'model_form' : str - this will always take the form of:
-                                             "Average of" + f"{number_of_models}" + "models :" + f"{name_of_each_model_separated_by_spaces}"
-                        'test_set_actuals' : list - the actual y figures from the test set
-                        'test_set_predictions' : list - the predicted y figures forecasted from the training set
-                        'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
-                in self.mape, a key is added as the model name (specified in call_me), and the MAPE as the value
-                    MAPE defined as the mean APE (Absolute Percent Error) stored in self.info for the given model
             Parameters: models : str or list, if str one of "all" or starts with "top_", default "all"
                             "all" will average all models, except the naive model (named in the naive_is_called parameter) or any None models (models that errored out before being evaluated)
                             starts with "top_" will average the top however many models are specified according to their respective MAPE values on the test set (lower = better)
@@ -971,8 +1099,7 @@ class Forecaster:
                     if (i+1) <= int(models.split('_')[1]):
                         avg_these_models.append(m)
         else:
-            print(f'argument in models parameter not recognized: {models}')
-            return None
+            raise ValueError(f'argument in models parameter not recognized: {models}')
             
         if len(avg_these_models) == 0:
             print('no models found to average')
@@ -984,6 +1111,9 @@ class Forecaster:
                     test_length = self.info[m]['holdout_periods']
                 else:
                     test_length = min(test_length,self.info[m]['holdout_periods'])
+        else:
+            assert isinstance(test_length,int)
+            assert test_length >= 1
         
         self.mape[call_me] = 1
         self.forecasts[call_me] = [None]*self.forecast_out_periods
@@ -1010,6 +1140,27 @@ class Forecaster:
         self.info[call_me]['test_set_ape'] = list(test_set_ape_df.mean(axis=1))
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
         self.forecasts[call_me] = list(forecasts.mean(axis=1))
+
+    def forecast_naive(self,call_me='naive',mape=1.0):
+        """ forecasts with a naive method of using the last observed y value propogated forward
+            Parameters: call_me : str, default "naive"
+                            what to call the evaluated model -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        mape : float, default 1.0
+                            the MAPE to assign to the model -- since the model is not tested, this should be some arbitrarily high number
+                            if a numeric type is not passed, it will default to 1 and an error will not be raised
+        """
+        if not isinstance(mape,(int,float)):
+            print(f'changing passed mape value of {mape} to 1.0')
+            mape = 1.0
+            
+        self.mape[call_me] = mape
+        self.forecasts[call_me] = [self.y[-1]]*self.forecast_out_periods
+        
+        self.info[call_me] = {'holdout_periods':None,
+                             'model_form':'Naive',
+                             'test_set_actuals':[None],
+                             'test_set_predictions':[None],
+                             'test_set_ape':[None]}
 
     def set_best_model(self):
         """ sets the best forecast model based on which model has the lowest MAPE value for the given holdout periods
