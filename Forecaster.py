@@ -246,7 +246,7 @@ class Forecaster:
                             if dict, key is a column name and value is one of 'remove','impute_mean','impute_median','impute_mode','forward_fill','backward_fill','impute_w_nearest_neighbors'
                             if str, one method applied to all columns
                             if dict, the selected methods only apply to column names in the dictionary
-                            if bool, only False supported -- False means this will be ignored, any unsupported argument raises a value error
+                            if bool, only False supported -- False means this will be ignored, any unsupported argument raises an error
         """
         def _remove_(c):
             xreg_df.drop(columns=c,inplace=True)
@@ -301,7 +301,7 @@ class Forecaster:
                     elif v == 'impute_w_nearest_neighbors':
                         _impute_w_nearest_neighbors_(c)
                     else:
-                        raise ValueError(f'argument {v} not supported for columns {c}, ignoring')
+                        raise ValueError(f'argument {v} not supported for columns {c}')
 
             elif isinstance(process_missing_columns,str):
                 for c in xreg_df:
@@ -321,9 +321,9 @@ class Forecaster:
                         elif process_missing_columns == 'impute_w_nearest_neighbors':
                             _impute_w_nearest_neighbors_(c)
                         else:
-                            raise ValueError(f'argument {process_missing} not supported, ignoring')
+                            raise ValueError(f'argument {process_missing} not supported')
             else:
-                raise ValueError(f'argument {process_missing} not supported, ignoring')
+                raise ValueError(f'argument {process_missing} not supported')
 
         if not date_col is None:
             current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
@@ -333,13 +333,9 @@ class Forecaster:
             future_xreg_df = xreg_df.iloc[len(self.y):]
 
         assert current_xreg_df.shape[0] == len(self.y)
-
         self.forecast_out_periods = future_xreg_df.shape[0]
-        self.current_xreg = {}
-        self.future_xreg = {}
-        for c in current_xreg_df:
-            self.current_xreg[c] = list(current_xreg_df[c])
-            self.future_xreg[c] = list(future_xreg_df[c])
+        self.current_xreg = current_xreg_df.to_dict(orient='list')
+        self.future_xreg = fututre_xreg.to_dict(orient='list')
 
     def set_and_check_data_types(self,check_xreg=True):
         """ changes all attributes in self to lists, dicts, strs, or whatever makes it easier for the program to work with with no errors
@@ -859,9 +855,9 @@ class Forecaster:
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        from sklearn.ensemble import RandomForestRegressor
         assert isinstance(test_length,int)
         assert test_length >= 1
-        from sklearn.ensemble import RandomForestRegressor
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = RandomForestRegressor(**hyper_params,random_state=20)
@@ -888,9 +884,9 @@ class Forecaster:
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        from sklearn.ensemble import GradientBoostingRegressor
         assert isinstance(test_length,int)
         assert test_length >= 1
-        from sklearn.ensemble import GradientBoostingRegressor
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = GradientBoostingRegressor(**hyper_params,random_state=20)
@@ -917,9 +913,9 @@ class Forecaster:
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        from sklearn.ensemble import AdaBoostRegressor
         assert isinstance(test_length,int)
         assert test_length >= 1
-        from sklearn.ensemble import AdaBoostRegressor
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = AdaBoostRegressor(**hyper_params,random_state=20)
@@ -946,9 +942,9 @@ class Forecaster:
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        from sklearn.neural_network import MLPRegressor
         assert isinstance(test_length,int)
         assert test_length >= 1
-        from sklearn.neural_network import MLPRegressor
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = MLPRegressor(**hyper_params,random_state=20)
@@ -972,9 +968,9 @@ class Forecaster:
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        from sklearn.linear_model import LinearRegression
         assert isinstance(test_length,int)
         assert test_length >= 1
-        from sklearn.linear_model import LinearRegression
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = LinearRegression()
@@ -1001,9 +997,9 @@ class Forecaster:
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        from sklearn.linear_model import Ridge
         assert isinstance(test_length,int)
         assert test_length >= 1
-        from sklearn.linear_model import Ridge
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = Ridge(alpha=alpha)
@@ -1030,9 +1026,9 @@ class Forecaster:
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        from sklearn.linear_model import Lasso
         assert isinstance(test_length,int)
         assert test_length >= 1
-        from sklearn.linear_model import Lasso
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = Lasso(alpha=alpha)
@@ -1059,9 +1055,9 @@ class Forecaster:
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
         """
+        from sklearn.svm import SVR
         assert isinstance(test_length,int)
         assert test_length >= 1
-        from sklearn.svm import SVR
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = SVR(**hyper_params)
