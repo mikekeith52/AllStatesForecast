@@ -1430,7 +1430,7 @@ class Forecaster:
             else:
                 raise ValueError(f'models argument not supported: {models}')
         elif isinstance(models,list):
-            plot_these_models = self.order_all_forecasts_best_to_worst()[:]
+            plot_these_models = [m for m in self.order_all_forecasts_best_to_worst() if m in models]
         else:
             raise ValueError(f'models must be a list or str type')
 
