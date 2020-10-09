@@ -1,5 +1,7 @@
 pip install rpy2
-pip install tqdm
+pip install cx_Oracle
+pip install sqlalchemy
+pip install eli5
 pip install pandas-datareader
 conda install -c conda-forge nodejs
 pip install ipywidgets
