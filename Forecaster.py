@@ -25,6 +25,7 @@ class Forecaster:
             tbats (R forecast pkg: tbats)
             ets (R forecast pkg: ets)
             vecm (R tsDyn pkg: VECM)
+            var (R vars pkg: VAR)
             average (any number of models can be averaged)
             naive (propogates final observed value forward)
         more models can be added by building more methods
@@ -40,7 +41,7 @@ class Forecaster:
                 in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
                 in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
                 in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features
-                    if it is an sklearn model, it will be permutation feature importance
+                    if it is an sklearn model, it will be permutation feature importance from the eli5 package
                     if it is an R model, it will be Pearson correlation coefficients and p-values
                     if a given model uses no regressors, there will be no key added here for that model
 
@@ -335,7 +336,7 @@ class Forecaster:
         assert current_xreg_df.shape[0] == len(self.y)
         self.forecast_out_periods = future_xreg_df.shape[0]
         self.current_xreg = current_xreg_df.to_dict(orient='list')
-        self.future_xreg = fututre_xreg.to_dict(orient='list')
+        self.future_xreg = future_xreg_df.to_dict(orient='list')
 
     def set_and_check_data_types(self,check_xreg=True):
         """ changes all attributes in self to lists, dicts, strs, or whatever makes it easier for the program to work with with no errors
@@ -400,7 +401,7 @@ class Forecaster:
                             if this is a list, the externals in the list will be excluded when testing correlation
                             if this is not a ist, then it will be ignored and no extenrals will be excluded
                             if include_only is a list, this is ignored
-                            note: is possible for include_only to be its default value, "all", and exclude to not be ignored if it is passed as a list type
+                            note: it is possible for include_only to be its default value, "all", and exclude to not be ignored if it is passed as a list type
                         quiet : bool or any other data type, default True
                             if this is True, then if a given external is ignored (either because no correlation could be calculated or there are no observations after its tail has been chopped), you will not know
                             if this is not True, then if a given external is ignored, it will print which external is being skipped
@@ -415,7 +416,7 @@ class Forecaster:
             for e in include_only:
                 use_these_externals[e] = self.current_xreg[e]
         else:
-            use_these_externals = self.current_xreg
+            use_these_externals = self.current_xreg.copy()
             if isinstance(exclude,list):
                 for e in exclude:
                     use_these_externals.pop(e)
@@ -427,7 +428,7 @@ class Forecaster:
                 y = np.array(self.y[:(chop_tail_periods*-1)])
             else:
                 x = np.array(v)
-                y = np.array(self.y)
+                y = np.array(self.y[:])
                 
             if (x.min() <= 0) & (y.min() > 0):
                 y = log_diff(y)
@@ -450,7 +451,8 @@ class Forecaster:
         self.ordered_xreg = [h[0] for h in k.most_common()] # this should give us the ranked external regressors
 
     def forecast_arima(self,test_length=1,Xvars='all',call_me='arima'):
-        """ forecasts using auto.arima from the forecast package in R
+        """ Auto-Regressive Integrated Moving Average 
+            forecasts using auto.arima from the forecast package in R
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -532,7 +534,8 @@ class Forecaster:
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
 
     def forecast_tbats(self,test_length=1,call_me='tbats'):
-        """ forecasts using tbats from the forecast package in R
+        """ Exponential Smoothing State Space Model With Box-Cox Transformation, ARMA Errors, Trend And Seasonal Component
+            forecasts using tbats from the forecast package in R
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -587,7 +590,8 @@ class Forecaster:
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
 
     def forecast_ets(self,test_length=1,call_me='ets'):
-        """ forecasts using ets from the forecast package in R
+        """ Exponential Smoothing State Space Model
+            forecasts using ets from the forecast package in R
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -641,25 +645,21 @@ class Forecaster:
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
 
-    def forecast_vecm(self,*cids,r=1,test_length=1,max_lags=6,Xvars='all',call_me='vecm',optimizer='AIC',max_externals=None):
-        """ forecasts using VECM from the tsDyn package in R
-            Optimizes the final model with different lags, time trends, constants, and x variables by minimizing the AIC or BIC in the training set
-            Parameters: cids*
-                            lists of cointegrated data
+    def forecast_var(self,*series,auto_resize=False,test_length=1,Xvars='all',lag_ic='AIC',optimizer='AIC',season='NULL',max_externals=None,call_me='var'):
+        """ Vector Auto Regression
+            forecasts using VAR from the vars package in R
+            Optimizes the final model with different time trends, constants, and x variables by minimizing the AIC or BIC in the training set
+            Unfortunately, only supports a level forecast, so to avoid stationaity issues, perform your own transformations before loading the data
+            Parameters: *series
                             there must be at least one list passed (cids cannot be empty)
-                            each list must be the same size as self.y
-                            if this is only one list, it must be cointegrated with self.y
-                            if more than 1 list, there must be at least 1 cointegrated pair between cids* and self.y (to fulfill the requirements of VECM)
-                        r : int, default 1
-                            the number of total cointegrated relationships between self.y and *cids
-                            if not an int or less than 1, an AssertionError is raised
+                            each list must be the same size as self.y is auto_resize if False
+                        auto_resize : bool, default False
+                            if True, if series in *series are different size than self.y, all series will be truncated to match the shortest series
+                            if True, note that the forecast will not necessarily make predictions based on the entire history available in y
+                            using this assumes that the shortest series ends at the same time the others do and there are no periods missing
                         test_length : int, default 1
                             the number of periods to hold out in order to test the model
                             must be at least 1 (AssertionError raised if not)
-                        max_lags : int, default 6
-                            the total number of lags that will be used in the optimization process
-                            1 to this number will be attempted
-                            if not an int or less than 0, an AssertionError is raised
                         Xvars : list or any other data type, default "all"
                             the independent variables used to make predictions
                             if it is a list, will attempt to estimate a model with that list of Xvars
@@ -668,33 +668,43 @@ class Forecaster:
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
                             if it is "all", will attempt to estimate a model with all available x regressors
                             because the VBECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
-                        call_me : str, default "vecm"
-                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        lag_ic : str, one of "AIC", "HQ", "SC", "FPE"; default "AIC"
+                            the information criteria used to determine the optimal number of lags in the VAR function
                         optimizer : str, one of "AIC","BIC"; default "AIC"
                             the information criteria used to select the best model in the optimization grid
                             a good, short resource to understand the difference: https://www.methodology.psu.edu/resources/AIC-vs-BIC/
+                        season : int, default "NULL"
+                            the number of periods to add a seasonal component to the model
+                            if "NULL", no seasonal component will be added
+                            don't use None ("NULL" is passed directly to the R CRAN mirror)
+                            example: if you're data is monthly and you suspect seasonality, you would probably want to make this 12
                         max_externals: int or None type, default None
                             the maximum number of externals to try in each model iteration
                             0 to this value of externals will be attempted and every combination of externals will be tried
                             None signifies that all combinations will be tried
                             reducing this from None can speed up processing and reduce overfitting
+                        call_me : str, default "var"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
-        if len(cids) == 0:
-            raise ValueError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids')
-        for cid in cids:
-            if not isinstance(cid,list):
-                raise TypeError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids')
-            elif len(cid) != len(self.y):
-                raise ValueError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids')
+        if len(series) == 0:
+            raise ValueError('cannot run var -- need at least 1 series in a list that is same length as y passed to *series--no list found')
+        series_df = pd.DataFrame()
+        for i, s in enumerate(series):
+            if not isinstance(s,list):
+                raise TypeError('cannot run var -- need at least 1 series in a list passed to *series--not a list type detected')
+            elif (len(s) != len(self.y)) & (not auto_resize):
+                raise ValueError('cannot run var -- need at least 1 series in a list that is same length as y passed to *series--at least 1 list is different length than y--try changing auto_resize to True')
+            elif auto_resize:
+                min_size = min([len(s) for s in series])
+                s = s[:min_size]
+            else:
+                raise ValueError(f'argument in auto_resize not recognized: {auto_resize}')
+            series_df[f'cid{i+1}'] = s # cid for cointegrated data because I copied and pasted this from forecast_vecm
 
-        assert isinstance(r,int)
-        assert r >= 1
         assert isinstance(test_length,int)
         assert test_length >= 1
-        assert isinstance(max_lags,int)
-        assert max_lags >= 0
 
-        if optimizer not in ['AIC','BIC']:
+        if optimizer not in ('AIC','BIC'):
             raise ValueError(f'cannot estimate model - optimizer value of {optimizer} not recognized')
 
         if max_externals is None:
@@ -707,12 +717,11 @@ class Forecaster:
             else:
                 raise ValueError(f'Xvars argument {Xvars} not recognized')
 
-        self._prepr('MLmetrics','tsDyn',test_length=test_length,call_me=call_me,Xvars=Xvars)
-        cid_df = pd.DataFrame()
-        for i, cid in enumerate(cids):
-            cid_df[f'cid{i+1}'] = cid
+        if lag_ic not in ("AIC", "HQ", "SC", "FPE"):
+            raise ValueError(f'cannot estimate model - optimizer value of {optimizer} not recognized')
 
-        cid_df.to_csv('tmp/tmp_r_cid.csv',index=False)
+        self._prepr('vars',test_length=test_length,call_me=call_me,Xvars=Xvars)
+        series_df.to_csv('tmp/tmp_r_cid.csv',index=False)
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
 
         ro.r(f"""
@@ -721,13 +730,18 @@ class Forecaster:
                 data <- read.csv('tmp/tmp_r_current.csv')
                 cid <- read.csv('tmp/tmp_r_cid.csv')
                 test_periods <- {test_length}
-                r <- {r}
-                IC <- {optimizer}
                 max_ext <- {max_externals}
-                max_lags <- {max_lags}
+                lag_ic <- "{lag_ic}"
+                IC <- {optimizer}
+                season <- {season}
+                n_ahead <- {self.forecast_out_periods}
             """)
 
         ro.r("""
+                total_length <- min(nrow(data),nrow(cid))
+                data <- data[(nrow(data) - total_length + 1) : nrow(data), ]
+                cid <- cid[(nrow(cid) - total_length + 1) : nrow(cid), ]
+
                 if (ncol(data) > 1){
                     exogen_names <- names(data)[2:ncol(data)]
                     exogen_future <- read.csv('tmp/tmp_r_future.csv')
@@ -752,8 +766,223 @@ class Forecaster:
                     exogen_test <- data[(nrow(data)-(test_periods-1)):nrow(data),names(data)[2:ncol(data)]]
                 } else {
                     exogen <- list(NULL)
+                    exogen_future <- NULL
                 }
                 
+                data.ts <- cbind(data[[1]],cid)
+                data.ts_train <- data.ts[1:(nrow(data)-test_periods),]
+                data.ts_test <- data.ts[(nrow(data)-(test_periods-1)):nrow(data),]
+
+                # create a grid of parameters for the best estimator for each series pair
+                include = c('none','const','trend','both')
+
+                grid <- expand.grid(include = include, exogen=exogen)
+                grid$ic <- 999999
+
+                for (i in 1:nrow(grid)){
+                  if (is.null(grid[i,'exogen'][[1]])){
+                    ex_train = NULL
+                  } else {
+                    ex_train = exogen_train[,grid[i,'exogen'][[1]]]
+                  }
+
+                  vc_train <- VAR(data.ts_train,
+                                      season=season,
+                                      ic='AIC',
+                                      type=as.character(grid[i,'include']),
+                                      exogen=ex_train)
+                  grid[i,'ic'] <-  IC(vc_train)
+                }
+
+                # choose parameters where MAPE is smallest
+                best_params <- grid[grid$ic == min(grid$ic),]
+
+                # set externals
+                if (is.null(best_params[1,'exogen'][[1]])){
+                  ex_current = NULL
+                  ex_future = NULL
+                  ex_train = NULL
+                  ex_test = NULL
+
+                } else {
+                  ex_current = as.matrix(data[,best_params[1,'exogen'][[1]]])
+                  ex_future = as.matrix(exogen_future[,best_params[1,'exogen'][[1]]])
+                  ex_train = as.matrix(exogen_train[,best_params[1,'exogen'][[1]]])
+                  ex_test = as.matrix(exogen_test[,best_params[1,'exogen'][[1]]])
+                }
+                
+                # predict on test set one more time with best parameters for model accuracy info
+                vc_train <- VAR(data.ts_train,
+                                 season=season,
+                                 ic='AIC',
+                                 type = as.character(best_params[1,'include']),
+                                 exogen=ex_train)
+                pred <- predict(vc_train,n.ahead=test_periods,dumvar=ex_test)
+                p <- data.frame(row.names=1:nrow(data.ts_test))
+                for (i in 1:length(pred$fcst)) {
+                  p$col <- pred$fcst[[i]][,1]
+                  names(p)[i] <- paste0('series',i)
+                }
+                p$model_form <- paste('VAR','include:',best_params[1,'include'])
+
+                write.csv(p,'tmp/tmp_test_results.csv',row.names=F)
+
+                # train the final model on full dataset with best parameter values
+                vc.out = VAR(data.ts,
+                              season=season,
+                              ic=lag_ic,
+                              type = as.character(best_params[1,'include']),
+                              exogen=ex_current
+                )
+                # make the forecast
+                fcst <- predict(vc.out,n.ahead=n_ahead,dumvar=ex_future)
+                f <- data.frame(row.names=1:n_ahead)
+                for (i in 1:length(fcst$fcst)) {
+                  f$col <- fcst$fcst[[i]][,1]
+                  names(f)[i] <- paste0('series',i)
+                }
+                # write final forecast values
+                write.csv(f,'tmp/tmp_forecast.csv',row.names=F)
+        """)
+        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['test_set_predictions'] = list(tmp_test_results.iloc[:,0])
+        self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
+        self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / y for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
+        self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
+        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self.forecasts[call_me] = list(tmp_forecast.iloc[:,0])
+
+    def forecast_vecm(self,*cids,auto_resize=False,test_length=1,Xvars='all',r=1,max_lags=6,optimizer='AIC',max_externals=None,call_me='vecm'):
+        """ Vector Error Correction Model
+            forecasts using VECM from the tsDyn package in R
+            Optimizes the final model with different lags, time trends, constants, and x variables by minimizing the AIC or BIC in the training set
+            Parameters: *cids
+                            lists of cointegrated data
+                            there must be at least one list passed (cids cannot be empty)
+                            each list must be the same size as self.y
+                            if this is only one list, it must be cointegrated with self.y
+                            if more than 1 list, there must be at least 1 cointegrated pair between cids* and self.y (to fulfill the requirements of VECM)
+                        auto_resize : bool, default False
+                            if True, if series in *series are different size than self.y, all series will be truncated to match the shortest series
+                            if True, note that the forecast will not necessarily make predictions based on the entire history available in y
+                            using this assumes that the shortest series ends at the same time the others do and there are no periods missing
+                        test_length : int, default 1
+                            the number of periods to hold out in order to test the model
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or any other data type, default "all"
+                            the independent variables used to make predictions
+                            if it is a list, will attempt to estimate a model with that list of Xvars
+                            if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
+                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
+                            if it is "all", will attempt to estimate a model with all available x regressors
+                            because the VBECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
+                        r : int, default 1
+                            the number of total cointegrated relationships between self.y and *cids
+                            if not an int or less than 1, an AssertionError is raised
+                        max_lags : int, default 6
+                            the total number of lags that will be used in the optimization process
+                            1 to this number will be attempted
+                            if not an int or less than 0, an AssertionError is raised
+                        optimizer : str, one of "AIC","BIC"; default "AIC"
+                            the information criteria used to select the best model in the optimization grid
+                            a good, short resource to understand the difference: https://www.methodology.psu.edu/resources/AIC-vs-BIC/
+                        max_externals: int or None type, default None
+                            the maximum number of externals to try in each model iteration
+                            0 to this value of externals will be attempted and every combination of externals will be tried
+                            None signifies that all combinations will be tried
+                            reducing this from None can speed up processing and reduce overfitting
+                        call_me : str, default "vecm"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+
+        """
+        if len(cids) == 0:
+            raise ValueError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids--no list found')
+        cid_df = pd.DataFrame()
+        for cid in cids:
+            if not isinstance(cid,list):
+                raise TypeError('cannot run var -- need at least 1 series in a list passed to *cids--not a list type detected')
+            elif (len(cid) != len(self.y)) & (not auto_resize):
+                raise ValueError('cannot run var -- need at least 1 series in a list that is same length as y passed to *cids--at least 1 list is different length than y--try changing auto_resize to True')
+            elif auto_resize:
+                min_size = min([len(cid) for cid in cids])
+                cid = cid[:min_size]
+            else:
+                raise ValueError(f'argument in auto_resize not recognized: {auto_resize}')
+            cid_df[f'cid{i+1}'] = cid
+
+        assert isinstance(r,int)
+        assert r >= 1
+        assert isinstance(test_length,int)
+        assert test_length >= 1
+        assert isinstance(max_lags,int)
+        assert max_lags >= 0
+
+        if optimizer not in ('AIC','BIC'):
+            raise ValueError(f'cannot estimate model - optimizer value of {optimizer} not recognized')
+
+        if max_externals is None:
+            if isinstance(Xvars,list):
+                max_externals = len(Xvars)
+            elif Xvars == 'all':
+                max_externals = len(self.current_xreg.keys())
+            elif Xvars.startswith('top_'):
+                max_externals = int(Xvars.split('_')[1])
+            else:
+                raise ValueError(f'Xvars argument {Xvars} not recognized')
+
+        self._prepr('MLmetrics','tsDyn',test_length=test_length,call_me=call_me,Xvars=Xvars)
+        cid_df.to_csv('tmp/tmp_r_cid.csv',index=False)
+        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+
+        ro.r(f"""
+                rm(list=ls())
+                setwd('{rwd}')
+                data <- read.csv('tmp/tmp_r_current.csv')
+                cid <- read.csv('tmp/tmp_r_cid.csv')
+                test_periods <- {test_length}
+                r <- {r}
+                IC <- {optimizer}
+                max_ext <- {max_externals}
+                max_lags <- {max_lags}
+                n_ahead <- {self.forecast_out_periods}
+            """)
+
+        ro.r("""
+                total_length <- min(nrow(data),nrow(cid))
+                data <- data[(nrow(data) - total_length + 1) : nrow(data), ]
+                cid <- cid[(nrow(cid) - total_length + 1) : nrow(cid), ]
+
+                if (ncol(data) > 1){
+                    exogen_names <- names(data)[2:ncol(data)]
+                    exogen_future <- read.csv('tmp/tmp_r_future.csv')
+                    exogen_train <- data[1:(nrow(data)-test_periods),names(data)[2:ncol(data)]]
+                    exogen_test <- data[(nrow(data)-(test_periods-1)):nrow(data),names(data)[2:ncol(data)]]
+
+                    # every combination of the external regressors, including no external regressors
+                    exogenstg1 <- list()
+                    for (i in 1:length(exogen_names)){
+                      exogenstg1[[i]] <- combn(exogen_names,i)
+                    }
+
+                    h <- 2
+                    exogen <- list(NULL)
+                    for (i in 1:min(max_ext,length(exogenstg1))) {
+                      for (j in 1:ncol(exogenstg1[[i]])) {
+                        exogen[[h]] <- exogenstg1[[i]][,j]
+                        h <- h+1
+                      }
+                    }
+                    exogen_train <- data[1:(nrow(data)-test_periods),names(data)[2:ncol(data)]]
+                    exogen_test <- data[(nrow(data)-(test_periods-1)):nrow(data),names(data)[2:ncol(data)]]
+                } else {
+                    exogen <- list(NULL)
+                    exogen_future <- NULL
+                }
+                                
                 data.ts <- cbind(data[[1]],cid)
                 data.ts_train <- data.ts[1:(nrow(data)-test_periods),]
                 data.ts_test <- data.ts[(nrow(data)-(test_periods-1)):nrow(data),]
@@ -821,7 +1050,7 @@ class Forecaster:
                 )
 
                 # make the forecast
-                f <- as.data.frame(predict(vc.out,n.ahead=nrow(exogen_future),exoPred=ex_future))
+                f <- as.data.frame(predict(vc.out,n.ahead=n_ahead,exoPred=ex_future))
                 # write final forecast values
                 write.csv(f,'tmp/tmp_forecast.csv',row.names=F)
         """)
@@ -1090,10 +1319,8 @@ class Forecaster:
         elif isinstance(models,str):
             if models.startswith('top_'):
                 ordered_models = [e for e in self.order_all_forecasts_best_to_worst() if (e != call_me) & (not e is None)]
-                avg_these_models = []
-                for i, m in enumerate(ordered_models):
-                    if (i+1) <= int(models.split('_')[1]):
-                        avg_these_models.append(m)
+                avg_these_models = [m for i, m in enumerate(ordered_models) if (i+1) <= int(models.split('_')[1])]
+
         else:
             raise ValueError(f'argument in models parameter not recognized: {models}')
             
@@ -1169,5 +1396,65 @@ class Forecaster:
             using different-sized test sets for different models could cause some trouble here, but I don't see a better way
         """
         x = [h[0] for h in Counter(self.mape).most_common()]
-        x.reverse()
-        return x.copy()
+        return x[::-1] # reversed copy of the list
+
+    def display_ts_plot(self,models='all',print_model_form=False,print_mapes=False,print_covariates=False,ci=None):
+        """ Plots time series results of the stored forecasts
+            All models plotted in order of best-to-worst mapes
+            Parameters: models : str or list, default "all"
+                            the models you want plotted
+                            if "all" plots all models
+                            if list type, plots all models in the list
+                            if starts with "top_" reads the next character(s) as the top however models you want plotted
+                        print_model_form : bool, default False
+                            whether to print the model form to the console of the models being plotted
+                        print_mapes : bool, default False
+                            whether to print the MAPEs to the console of the models being plotted
+                        print_covariates : bool, default False 
+                            whether to print the regressors used in the models being plotted
+                            only works if the variable feature importance were written to self.feature_importance as a dataframe with the index being variable names
+                        ci : see seaborn documentation for ci
+        """
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        if isinstance(models,str):
+            if models == 'all':
+                plot_these_models = self.order_all_forecasts_best_to_worst()[:]
+            elif models.startswith('top_'):
+                top = int(models.split('_')[1])
+                if top > len(self.forecasts.keys()):
+                    plot_these_models = self.order_all_forecasts_best_to_worst()[:]
+                else:
+                    plot_these_models = self.order_all_forecasts_best_to_worst()[:top]
+            else:
+                raise ValueError(f'models argument not supported: {models}')
+        elif isinstance(models,list):
+            plot_these_models = self.order_all_forecasts_best_to_worst()[:]
+        else:
+            raise ValueError(f'models must be a list or str type')
+
+        if (print_model_form) | (print_mapes) | (print_covariates):
+            for m in plot_these_models:
+                print_text = '{} '.format(m)
+                if print_model_form:
+                    print_text += "model form: {} ".format(self.info[m]['model_form'])
+                if print_mapes:
+                    print_text += "{}-period test-set MAPE: {} ".format(self.info[m]['holdout_periods'],self.mape[m])
+                if print_covariates:
+                    print_text += "regressors: {}".format(list(self.feature_importance[m].index) if m in self.feature_importance else None)
+                print(print_text)
+
+        sns.lineplot(x=pd.to_datetime(self.current_dates),y=self.y,ci=None)
+        labels = ['Actual']
+
+        for m in plot_these_models:
+            sns.lineplot(x=pd.to_datetime(self.future_dates),y=self.forecasts[m],ci=ci)
+            labels.append(m)
+
+        plt.legend(labels=labels,loc='best')
+        plt.xlabel('Date')
+        plt.ylabel(f'{self.name}')
+        plt.title(f'{self.name} Forecast Results')
+        plt.show()
+
