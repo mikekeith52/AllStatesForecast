@@ -650,8 +650,8 @@ class Forecaster:
             forecasts using VAR from the vars package in R
             Optimizes the final model with different time trends, constants, and x variables by minimizing the AIC or BIC in the training set
             Unfortunately, only supports a level forecast, so to avoid stationaity issues, perform your own transformations before loading the data
-            Parameters: *series
-                            there must be at least one list passed (cids cannot be empty)
+            Parameters: *series : required
+                            lists of other series to run the VAR with
                             each list must be the same size as self.y is auto_resize if False
                         auto_resize : bool, default False
                             if True, if series in *series are different size than self.y, all series will be truncated to match the shortest series
@@ -677,7 +677,7 @@ class Forecaster:
                             the number of periods to add a seasonal component to the model
                             if "NULL", no seasonal component will be added
                             don't use None ("NULL" is passed directly to the R CRAN mirror)
-                            example: if you're data is monthly and you suspect seasonality, you would probably want to make this 12
+                            example: if your data is monthly and you suspect seasonality, you would probably want to make this 12
                         max_externals: int or None type, default None
                             the maximum number of externals to try in each model iteration
                             0 to this value of externals will be attempted and every combination of externals will be tried
@@ -859,9 +859,8 @@ class Forecaster:
         """ Vector Error Correction Model
             forecasts using VECM from the tsDyn package in R
             Optimizes the final model with different lags, time trends, constants, and x variables by minimizing the AIC or BIC in the training set
-            Parameters: *cids
+            Parameters: *cids : required
                             lists of cointegrated data
-                            there must be at least one list passed (cids cannot be empty)
                             each list must be the same size as self.y
                             if this is only one list, it must be cointegrated with self.y
                             if more than 1 list, there must be at least 1 cointegrated pair between cids* and self.y (to fulfill the requirements of VECM)
