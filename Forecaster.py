@@ -12,7 +12,7 @@ rwd = os.getcwd().replace('\\','/')
 class Forecaster:
     """ object to forecast time series data
         natively supports the extraction of FRED data, could be expanded to other APIs with few adjustments
-        The following models are currently supported:
+        The following models are supported:
             random forest (sklearn)
             adaboost (sklearn)
             gradient boosted trees (sklearn)
