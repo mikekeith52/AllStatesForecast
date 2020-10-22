@@ -27,7 +27,7 @@ class Forecaster:
             vecm (R tsDyn pkg: VECM)
             var (R vars pkg: VAR)
             average (any number of models can be averaged)
-            naive (propogates final observed value forward)
+            naive (propagates final observed value forward)
         more models can be added by building more methods
 
         for every evaluated model, the following information is stored in the object attributes:
@@ -190,12 +190,12 @@ class Forecaster:
 
         for lib in libs:
             try:  importr(lib)
-            except: ro.r(f'install.packages("{lib}")') ; importr(lib)
+            except: ro.r(f'install.packages("{lib}")') ; importr(lib) # install then import the r lib
         current_df = pd.DataFrame(self.current_xreg)
         current_df['y'] = self.y
 
         if isinstance(Xvars,list):
-            current_df = current_df[['y'] + Xvars]
+            current_df = current_df[['y'] + Xvars] # reorder columns 
         elif Xvars is None:
             current_df = current_df['y']
         elif Xvars != 'all':
@@ -224,7 +224,7 @@ class Forecaster:
         self.y = list(df[series])
         self.current_dates = list(pd.to_datetime(df.index))
 
-    def process_xreg_df(self,xreg_df,date_col=None,remove_rows_with_missing_data=False,process_missing_columns=False):
+    def process_xreg_df(self,xreg_df,date_col=None,remove_rows_with_missing_data=False,process_missing_columns=False,**kwargs):
         """ takes a dataframe of external regressors
             any non-numeric data will be made into a 0/1 binary variable (using pd.get_dummies(drop_first=True))
             deals with columns with missing data
@@ -248,6 +248,8 @@ class Forecaster:
                             if str, one method applied to all columns
                             if dict, the selected methods only apply to column names in the dictionary
                             if bool, only False supported -- False means this will be ignored, any unsupported argument raises an error
+                        all keywords passed to the KNeighborsClassifier function (https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsClassifier.html)
+                            not relevant if not using this algorithm to impute missing values
         """
         def _remove_(c):
             xreg_df.drop(columns=c,inplace=True)
@@ -267,7 +269,7 @@ class Forecaster:
             predictors=[e for e in xreg_df if len(xreg_df[e].dropna())==len(xreg_df[e])] # predictor columns can have no NAs
             predictors=[e for e in predictors if e != c] # predictor columns cannot be the same as the column to impute (this should be taken care of in the line above, but jic)
             predictors=[e for e in predictors if xreg_df[e].dtype in (np.int32,np.int64,np.float32,np.float64,int,float)] # predictor columns must be numeric -- good idea to dummify as many columns as possible
-            clf = KNeighborsClassifier(3, weights='distance')
+            clf = KNeighborsClassifier(**kwargs)
             df_complete = xreg_df.loc[xreg_df[c].isnull()==False]
             df_nulls = xreg_df.loc[xreg_df[c].isnull()]
             trained_model = clf.fit(df_complete[predictors],df_complete[c])
@@ -381,9 +383,9 @@ class Forecaster:
                     for k,v in self.future_xreg.items():
                         self.future_xreg[k] = v[:n]
             else:
-              raise ValueError('n must be an int type greater than 1')  
+              raise ValueError('n must be greater than 1')  
         else:
-            raise ValueError('n must be an int type greater than 1')
+            raise ValueError('n must be an int type')
 
     def set_ordered_xreg(self,chop_tail_periods=0,include_only='all',exclude=None,quiet=True):
         """ method for ordering stored externals from most to least correlated, according to absolute Pearson correlation coefficient value
@@ -399,7 +401,7 @@ class Forecaster:
                             if this is a list, exclude will be ignored
                         exclude : list or any other data type, default None
                             if this is a list, the externals in the list will be excluded when testing correlation
-                            if this is not a ist, then it will be ignored and no extenrals will be excluded
+                            if this is not a list, then it will be ignored and no externals will be excluded
                             if include_only is a list, this is ignored
                             note: it is possible for include_only to be its default value, "all", and exclude to not be ignored if it is passed as a list type
                         quiet : bool or any other data type, default True
@@ -464,7 +466,7 @@ class Forecaster:
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
                             if it is "all", will attempt to estimate a model with all available x regressors
                             because the auto.arima function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
-                            if no arima model can be etimated, will raise an error
+                            if no arima model can be estimated, will raise an error
                         call_me : str, default "arima"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
@@ -484,6 +486,7 @@ class Forecaster:
             y_test <- y[(nrow(data)-{test_length} + 1):nrow(data)]
             
             """)
+
         ro.r("""
             if (ncol(data) > 1){
                 future_externals = read.csv('tmp/tmp_r_future.csv')
@@ -614,7 +617,7 @@ class Forecaster:
         
             ar <- ets(y_train)
             f <- forecast(ar,xreg=xreg_te,h=length(y_test))
-            # f[[2]] are point estimates, f[[9]] is the TBATS form
+            # f[[2]] are point estimates, f[[8]] is the ETS form
             p <- f[[2]]
             ets_form <- f[[8]]
             mape <- MLmetrics::MAPE(p,y_test)
@@ -649,7 +652,7 @@ class Forecaster:
         """ Vector Auto Regression
             forecasts using VAR from the vars package in R
             Optimizes the final model with different time trends, constants, and x variables by minimizing the AIC or BIC in the training set
-            Unfortunately, only supports a level forecast, so to avoid stationaity issues, perform your own transformations before loading the data
+            Unfortunately, only supports a level forecast, so to avoid stationarity issues, perform your own transformations before loading the data
             Parameters: *series : required
                             lists of other series to run the VAR with
                             each list must be the same size as self.y is auto_resize if False
@@ -667,7 +670,7 @@ class Forecaster:
                             "top" is determined through absolute value of the pearson correlation coefficient on the training set
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
                             if it is "all", will attempt to estimate a model with all available x regressors
-                            because the VBECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
+                            because the VAR function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
                         lag_ic : str, one of "AIC", "HQ", "SC", "FPE"; default "AIC"
                             the information criteria used to determine the optimal number of lags in the VAR function
                         optimizer : str, one of "AIC","BIC"; default "AIC"
@@ -696,8 +699,8 @@ class Forecaster:
                 raise ValueError('cannot run var -- need at least 1 series in a list that is same length as y passed to *series--at least 1 list is different length than y--try changing auto_resize to True')
             elif auto_resize:
                 min_size = min([len(s) for s in series])
-                s = s[:min_size]
-            else:
+                s = s[(len(s) - min_size):]
+            elif not not auto_resize:
                 raise ValueError(f'argument in auto_resize not recognized: {auto_resize}')
             series_df[f'cid{i+1}'] = s # cid for cointegrated data because I copied and pasted this from forecast_vecm
 
@@ -878,7 +881,7 @@ class Forecaster:
                             "top" is determined through absolute value of the pearson correlation coefficient on the training set
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
                             if it is "all", will attempt to estimate a model with all available x regressors
-                            because the VBECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
+                            because the VECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
                         r : int, default 1
                             the number of total cointegrated relationships between self.y and *cids
                             if not an int or less than 1, an AssertionError is raised
@@ -901,15 +904,15 @@ class Forecaster:
         if len(cids) == 0:
             raise ValueError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids--no list found')
         cid_df = pd.DataFrame()
-        for cid in cids:
+        for i, cid in enumerate(cids):
             if not isinstance(cid,list):
                 raise TypeError('cannot run var -- need at least 1 series in a list passed to *cids--not a list type detected')
             elif (len(cid) != len(self.y)) & (not auto_resize):
                 raise ValueError('cannot run var -- need at least 1 series in a list that is same length as y passed to *cids--at least 1 list is different length than y--try changing auto_resize to True')
             elif auto_resize:
                 min_size = min([len(cid) for cid in cids])
-                cid = cid[:min_size]
-            else:
+                cid = cid[(len(cid) - min_size):]
+            elif not not auto_resize:
                 raise ValueError(f'argument in auto_resize not recognized: {auto_resize}')
             cid_df[f'cid{i+1}'] = cid
 
@@ -1035,7 +1038,8 @@ class Forecaster:
                                   estim = as.character(best_params[1,'estim']),
                                   exogen=ex_train)
                 p <- as.data.frame(predict(vc_train,n.ahead=test_periods,exoPred=ex_test))
-                p$model_form <- paste('VECM',best_params[1,'lags'],'lags',best_params[1,'estim'],best_params[1,'include'],'Externals:',as.character(best_params[1,'exogen'])[[1]])
+                p$xreg <- as.character(best_params[1,'exogen'])[[1]]
+                p$model_form <- paste('VECM',best_params[1,'lags'],'lags',best_params[1,'estim'],best_params[1,'include'])
 
                 write.csv(p,'tmp/tmp_test_results.csv',row.names=F)
 
@@ -1057,6 +1061,9 @@ class Forecaster:
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
 
+        used_xreg = tmp_test_results['xreg'].values[0].replace('c(','').replace(')','').replace('"','').replace(' ','').split(',')
+        self.feature_importance[call_me].drop(index=[i for i in self.feature_importance[call_me].index if i not in used_xreg],inplace=True)
+
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results.iloc[:,0])
         self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
@@ -1077,7 +1084,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
-                            passed as an argment collection (**hyper_params) to the sklearn model
+                            passed as an argument collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
@@ -1106,7 +1113,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
-                            passed as an argment collection (**hyper_params) to the sklearn model
+                            passed as an argument collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
@@ -1135,7 +1142,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
-                            passed as an argment collection (**hyper_params) to the sklearn model
+                            passed as an argument collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
@@ -1164,7 +1171,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
-                            passed as an argment collection (**hyper_params) to the sklearn model
+                            passed as an argument collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
@@ -1277,7 +1284,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
                             any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
-                            passed as an argment collection (**hyper_params) to the sklearn model
+                            passed as an argument collection (**hyper_params) to the sklearn model
                         set_feature_importance : bool or any other data type, default True
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
@@ -1298,7 +1305,7 @@ class Forecaster:
     def forecast_average(self,models='all',call_me='average',test_length='max'):
         """ averages a set of models to make a new estimator
             Parameters: models : str or list, if str one of "all" or starts with "top_", default "all"
-                            "all" will average all models, except the naive model (named in the naive_is_called parameter) or any None models (models that errored out before being evaluated)
+                            "all" will average all models
                             starts with "top_" will average the top however many models are specified according to their respective MAPE values on the test set (lower = better)
                                 the character after "top_" must be an integer
                                 ex. "top_5"
@@ -1364,16 +1371,14 @@ class Forecaster:
         self.forecasts[call_me] = list(forecasts.mean(axis=1))
 
     def forecast_naive(self,call_me='naive',mape=1.0):
-        """ forecasts with a naive method of using the last observed y value propogated forward
+        """ forecasts with a naive method of using the last observed y value propagated forward
             Parameters: call_me : str, default "naive"
                             what to call the evaluated model -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         mape : float, default 1.0
                             the MAPE to assign to the model -- since the model is not tested, this should be some arbitrarily high number
-                            if a numeric type is not passed, it will default to 1 and an error will not be raised
+                            if a numeric type is not passed, a value error is raised
         """
-        if not isinstance(mape,(int,float)):
-            print(f'changing passed mape value of {mape} to 1.0')
-            mape = 1.0
+        float(mape)
             
         self.mape[call_me] = mape
         self.forecasts[call_me] = [self.y[-1]]*self.forecast_out_periods
@@ -1397,7 +1402,7 @@ class Forecaster:
         x = [h[0] for h in Counter(self.mape).most_common()]
         return x[::-1] # reversed copy of the list
 
-    def display_ts_plot(self,models='all',print_model_form=False,print_mapes=False,print_covariates=False,ci=None):
+    def display_ts_plot(self,models='all',print_model_form=False,print_mapes=False,print_covariates=False):
         """ Plots time series results of the stored forecasts
             All models plotted in order of best-to-worst mapes
             Parameters: models : str or list, default "all"
@@ -1431,7 +1436,7 @@ class Forecaster:
         elif isinstance(models,list):
             plot_these_models = [m for m in self.order_all_forecasts_best_to_worst() if m in models]
         else:
-            raise ValueError(f'models must be a list or str type')
+            raise ValueError(f'models must be a list or str type, got {type(models)}')
 
         if (print_model_form) | (print_mapes) | (print_covariates):
             for m in plot_these_models:
@@ -1448,7 +1453,7 @@ class Forecaster:
         labels = ['Actual']
 
         for m in plot_these_models:
-            sns.lineplot(x=pd.to_datetime(self.future_dates),y=self.forecasts[m],ci=ci)
+            sns.lineplot(x=pd.to_datetime(self.future_dates),y=self.forecasts[m])
             labels.append(m)
 
         plt.legend(labels=labels,loc='best')
