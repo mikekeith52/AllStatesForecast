@@ -22,6 +22,7 @@ class Forecaster:
             multi linear regression (sklearn)
             multi level perceptron (sklearn)
             arima (R forecast pkg: auto.arima with or without external regressors)
+            sarima (R seasonal pkg: seas with or without external regressors)
             tbats (R forecast pkg: tbats)
             ets (R forecast pkg: ets)
             vecm (R tsDyn pkg: VECM)
@@ -224,7 +225,7 @@ class Forecaster:
         self.y = list(df[series])
         self.current_dates = list(pd.to_datetime(df.index))
 
-    def process_xreg_df(self,xreg_df,date_col=None,remove_rows_with_missing_data=False,process_missing_columns=False,**kwargs):
+    def process_xreg_df(self,xreg_df,date_col=None,process_missing_columns=False,**kwargs):
         """ takes a dataframe of external regressors
             any non-numeric data will be made into a 0/1 binary variable (using pd.get_dummies(drop_first=True))
             deals with columns with missing data
@@ -282,9 +283,6 @@ class Forecaster:
             self.future_dates = list(xreg_df.loc[xreg_df[date_col] > self.current_dates[-1],date_col])
             xreg_df = xreg_df.loc[xreg_df[date_col] >= self.current_dates[0]]
         xreg_df = pd.get_dummies(xreg_df,drop_first=True)
-
-        if remove_rows_with_missing_data:
-            xreg_df.dropna(inplace=True)
 
         if not not process_missing_columns:
             if isinstance(process_missing_columns,dict):
@@ -536,12 +534,124 @@ class Forecaster:
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
 
-    def forecast_tbats(self,test_length=1,call_me='tbats'):
+    def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',X13_PATH='auto'):
+        """ Seasonal Auto-Regressive Integrated Moving Average
+            Forecasts using the seas function from the seasonal package, also need the X13 software (x13as.exe) saved locally
+            X13 is a sophisticated way to model seasonality with ARIMA, and the seasonal package provides a simple wrapper around the software with R
+            The function here is simplified greatly, but the power in X13 is its database of holidays and other precise ways to model seasonality, also takes into account outliers
+            Documentation: https://cran.r-project.org/web/packages/seasonal/seasonal.pdf, http://www.seasonal.website/examples.html
+            Parameters: start : tuple of length 2, default "auto"
+                            1st element is the start year
+                            2nd element is the start period in the appropriate interval
+                            for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)
+                            if auto, will assume the first date in self.current_dates is in yyyy-mm-01 form and will use that 
+                        interval : 1 of {1,2,4,12}, default 12
+                            1 for annual, 2 for bi-annual, 4 for quarterly, 12 for monthly
+                            unfortunately, x13 does not allow for more granularity than the monthly level
+                        Xvars : list or any other data type, default None
+                            the independent variables used to make predictions
+                            if it is a list, will attempt to estimate a model with that list of Xvars
+                            if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
+                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
+                            if it is "all", will attempt to estimate a model with all available x regressors
+                            because the auto.arima function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
+                            if no arima model can be estimated, will raise an error
+                            defaults to None here because the power of this model is in seasonality, and although external regressors are supported, they can just as easily weaken the model
+                        call_me : str, default "sarimax13"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        X13_PATH : str, default "auto"
+                            the local location of the x13as.exe executable
+                            if "auto", assumes it is saved in {local_directory}/x13asall_V1.1_B39/x13as
+                            be sure to use front slashes (/) and not backslashes (\\) to keep R happy
+        """
+        if start == 'auto':
+            start = tuple(np.array(self.current_dates[0].split('-')[:2]).astype(int))
+        if X13_PATH == 'auto':
+            X13_PATH = f'{rwd}/x13asall_V1.1_B39/x13as'
+
+        try: os.listdir(X13_PATH)
+        except FileNotFoundError: raise FileNotFoundError('x13as.exe not found. did you set X13_PATH?')
+
+        assert isinstance(test_length,int)
+        assert test_length >= 1
+        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self._prepr('forecast','seasonal',test_length=test_length,call_me=call_me,Xvars=Xvars)
+
+        ro.r(f"""
+            rm(list=ls())
+            Sys.setenv(X13_PATH = '{X13_PATH}')
+            setwd('{rwd}')
+            start_p <- c{start}
+            interval <- {interval}
+            test_length <- {test_length}
+            
+            data <- read.csv('tmp/tmp_r_current.csv')
+            
+            y <- ts(data$y,start=start_p,deltat=1/interval)
+            y_train <- subset(y,start=1,end=nrow(data)-test_length)
+            y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
+            
+            """)
+
+        ro.r("""
+                if (ncol(data) > 1){
+                  future_externals = read.csv('tmp/tmp_r_future.csv')
+                  r <- max(0,36-nrow(future_externals))
+                  filler <-as.data.frame(replicate(ncol(future_externals),rep(0,r)))
+                  names(filler) <- names(future_externals)
+                  future_externals <- rbind(future_externals,filler)
+                  externals <- names(data)[2:ncol(data)]
+                  data_c <- data.frame(data[,externals])
+                  data_f <- data.frame(future_externals[,externals])
+                  names(data_c) <- externals
+                  names(data_f) <- externals
+                  all_externals_ts <- ts(rbind(data_c,data_f),start=start_p,deltat=1/interval)
+                } else {
+                  all_externals_ts <- NULL
+                }
+        """)
+
+        ro.r(f"""
+            m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save = "forecasts")
+            p <- series(m_test, "forecast.forecasts")[1:test_length,]
+
+            arima_form <- paste('SARIMA',m_test$model$arima$model)
+            write <- data.frame(actual=y_test,forecast=p[,1])
+            write$APE <- abs(write$actual - write$forecast) / write$actual
+            write$model_form <- arima_form
+            write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+
+            m <- seas(x=y,xreg=all_externals_ts,forecast.save = "forecasts")
+            f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
+            arima_form <- paste('SARIMA',m$model$arima$model)
+            
+            write <- data.frame(forecast=f[,1])
+            write$model_form <- arima_form
+            write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+        """)
+
+        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+        self.mape[call_me] = tmp_test_results['APE'].mean()
+        self.forecasts[call_me] = list(tmp_forecast['forecast'])
+        
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
+        self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
+        self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
+        self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+
+    def forecast_tbats(self,test_length=1,season='NULL',call_me='tbats'):
         """ Exponential Smoothing State Space Model With Box-Cox Transformation, ARMA Errors, Trend And Seasonal Component
             forecasts using tbats from the forecast package in R
+            auto-regressive only (no external regressors)
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
+                        season : int or "NULL"
+                            the number of seasonal periods to consider (12 for monthly, etc.)
+                            if no seasonality desired, leave "NULL" as this will be passed directly to the tbats function in r
                         call_me : str, default "tbats"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
@@ -559,7 +669,7 @@ class Forecaster:
             y_train <- y[1:(nrow(data)-{test_length})]
             y_test <- y[(nrow(data)-{test_length} + 1):nrow(data)]
         
-            ar <- tbats(y_train)
+            ar <- tbats(y_train,seasonal.periods={season})
             f <- forecast(ar,xreg=xreg_te,h=length(y_test))
             # f[[2]] are point estimates, f[[9]] is the TBATS form
             p <- f[[2]]
@@ -595,6 +705,7 @@ class Forecaster:
     def forecast_ets(self,test_length=1,call_me='ets'):
         """ Exponential Smoothing State Space Model
             forecasts using ets from the forecast package in R
+            auto-regressive only (no external regressors)
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -655,7 +766,7 @@ class Forecaster:
             Unfortunately, only supports a level forecast, so to avoid stationarity issues, perform your own transformations before loading the data
             Parameters: *series : required
                             lists of other series to run the VAR with
-                            each list must be the same size as self.y is auto_resize if False
+                            each list must be the same size as self.y if auto_resize is False
                         auto_resize : bool, default False
                             if True, if series in *series are different size than self.y, all series will be truncated to match the shortest series
                             if True, note that the forecast will not necessarily make predictions based on the entire history available in y
@@ -865,7 +976,7 @@ class Forecaster:
             Parameters: *cids : required
                             lists of cointegrated data
                             each list must be the same size as self.y
-                            if this is only one list, it must be cointegrated with self.y
+                            if this is only 1 list, it must be cointegrated with self.y
                             if more than 1 list, there must be at least 1 cointegrated pair between cids* and self.y (to fulfill the requirements of VECM)
                         auto_resize : bool, default False
                             if True, if series in *series are different size than self.y, all series will be truncated to match the shortest series
@@ -1369,6 +1480,16 @@ class Forecaster:
         self.info[call_me]['test_set_ape'] = list(test_set_ape_df.mean(axis=1))
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
         self.forecasts[call_me] = list(forecasts.mean(axis=1))
+
+    def forecast_ma(self,n,call_me='ma'):
+        """ moving average
+        """
+        pass
+
+    def forecast_es(self,alpha,call_me='es'):
+        """ expoential smoothing
+        """
+        pass
 
     def forecast_naive(self,call_me='naive',mape=1.0):
         """ forecasts with a naive method of using the last observed y value propagated forward
