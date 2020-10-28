@@ -34,7 +34,7 @@ class Forecaster:
     def process_xreg_df(self):
         pass
 
-    def forecast_arima(self):
+    def forecast_auto_arima(self):
         pass
 
     def forecast_rf(self):
@@ -44,5 +44,8 @@ class Forecaster:
         pass
 
     def set_best_model(self):
+        pass
+
+    def display_ts_plot(self):
         pass
 
