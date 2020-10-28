@@ -42,9 +42,9 @@ class Forecaster:
                         'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
                 in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
                 in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
-                in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features
+                in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a table or dataframe that gives some info about the features
                     if it is an sklearn model, it will be permutation feature importance from the eli5 package
-                    if it is any other model, it will be Pearson correlation coefficients and p-values
+                    if it is any other model, it will either be the pearson correlation coefficients and p-values or some summary output
                     if a given model uses no regressors, there will be no key added here for that model
 
         Author Michael Keith: mikekeith52@gmail.com
@@ -124,9 +124,8 @@ class Forecaster:
             only works within an sklearn forecast method
             Parameters: test_length : int,
                             the length of the resulting test_set
-                        Xvars : list or str, default "all"
+                        Xvars : list or "all", default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
         """
         from sklearn.model_selection import train_test_split
         X = pd.DataFrame(self.current_xreg)
@@ -158,10 +157,10 @@ class Forecaster:
             file names: tmp_r_current.csv, tmp_r_future.csv
             libs are libs to import and/or install from R
             Parameters: call_me : str
-                        Xvars : list or str, default "all"
+                        Xvars : list, "all", or starts with "top_"
                         *libs: str
                             library names to import into the R environment
-                            if library name not found, will attempt to install (you will need to specify a CRAN mirror in a pop-up box)
+                            if library name not found in R environ, will attempt to install it (you will need to specify a CRAN mirror in a pop-up box)
         """
         from rpy2.robjects.packages import importr
         if isinstance(Xvars,str):
@@ -241,7 +240,6 @@ class Forecaster:
                             if None, assumes none of the columns are dates (if this is not the case, can cause bad results)
                             if None, assumes all dataframe obs start at the same time as self.y
                             if str, will use that column to resize the dataset to line up with self.current_dates and all future obs stored in self.future_xreg and self.future_dates
-                        remove_rows_with_missing_data : bool, default False
                         process_missing_columns : str, dict, or bool
                             how to process columns with missing data
                             if str, one of 'remove','impute_mean','impute_median','impute_mode','forward_fill','backward_fill','impute_w_nearest_neighbors'
@@ -302,7 +300,7 @@ class Forecaster:
                     elif v == 'impute_w_nearest_neighbors':
                         _impute_w_nearest_neighbors_(c)
                     else:
-                        raise ValueError(f'argument {v} not supported for columns {c}')
+                        raise ValueError(f'argument {v} not supported for columns {c} in process_missing')
 
             elif isinstance(process_missing_columns,str):
                 for c in xreg_df:
@@ -322,9 +320,9 @@ class Forecaster:
                         elif process_missing_columns == 'impute_w_nearest_neighbors':
                             _impute_w_nearest_neighbors_(c)
                         else:
-                            raise ValueError(f'argument {process_missing} not supported')
+                            raise ValueError(f'argument passed to process_missing not recogized: {process_missing}')
             else:
-                raise ValueError(f'argument {process_missing} not supported')
+                raise ValueError(f'argument passed to process_missing not recogized: {process_missing}')
 
         if not date_col is None:
             current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
@@ -339,8 +337,8 @@ class Forecaster:
         self.future_xreg = future_xreg_df.to_dict(orient='list')
 
     def set_and_check_data_types(self,check_xreg=True):
-        """ changes all attributes in self to lists, dicts, strs, or whatever makes it easier for the program to work with with no errors
-            if a conversion to these types is unsuccessful, will raise an error
+        """ changes all attributes in self to the object type they should be (list, str, dict, etc.)
+            if a conversion is unsuccessful, will raise an error
             Parameters: check_xreg : bool, default True
                 if True, checks that self.current_xreg and self.future_xregs are dict types (raises an error if check fails)
                 change this to False if wanting to perform auto-regressive forecasts only
@@ -367,7 +365,7 @@ class Forecaster:
             assert len(self.future_xreg[k]) == len(self.future_dates), f'the length of {k} ({len(self.future_xreg[k])}) stored in the future_xreg dict is not the same length as future_dates ({len(self.future_dates)})'
 
     def set_forecast_out_periods(self,n):
-        """ sets the self.forecast_out_periods attribute and changes self.future_dates and self.future_xreg appropriately
+        """ sets the self.forecast_out_periods attribute and truncates self.future_dates and self.future_xreg if needed
             Parameters: n : int
                 the number of periods you want to forecast out for
                 if this is a larger value than the size of self.future_dates, some models may fail
@@ -381,17 +379,19 @@ class Forecaster:
                     for k,v in self.future_xreg.items():
                         self.future_xreg[k] = v[:n]
             else:
-              raise ValueError('n must be greater than 1')  
+              raise ValueError(f'n must be greater than 1, got {n}')  
         else:
-            raise ValueError('n must be an int type')
+            raise ValueError(f'n must be an int type, got {type(n)}')
 
     def set_ordered_xreg(self,chop_tail_periods=0,include_only='all',exclude=None,quiet=True):
         """ method for ordering stored externals from most to least correlated, according to absolute Pearson correlation coefficient value
             will not error out if a given external has no variation in it -- will simply skip
             when measuring correlation, will log/difference variables when possible to compare stationary results
             stores the results in self.ordered_xreg as a list
+            if two vars are perfectly correlated, will skip the second one
+            resuting self.ordered_xreg attribute may therefore not contain all xregs but will contain as many as could be set
             Parameters: chop_tail_periods : int, default 0
-                            The number of periods to chop from the respective membermonths and externals list
+                            The number of periods to chop (to compare to a training dataset)
                             This is used to reduce the chance of overfitting the data by using mismatched test periods for forecasts
                         include_only : list or any other data type, default "all"
                             if this is a list, only the externals in the list will be considered when testing correlation
@@ -402,9 +402,9 @@ class Forecaster:
                             if this is not a list, then it will be ignored and no externals will be excluded
                             if include_only is a list, this is ignored
                             note: it is possible for include_only to be its default value, "all", and exclude to not be ignored if it is passed as a list type
-                        quiet : bool or any other data type, default True
+                        quiet : bool, default True
                             if this is True, then if a given external is ignored (either because no correlation could be calculated or there are no observations after its tail has been chopped), you will not know
-                            if this is not True, then if a given external is ignored, it will print which external is being skipped
+                            if this is False, then if a given external is ignored, it will print which external is being skipped
         """
         def log_diff(x):
             """ returns the logged difference of an array
@@ -453,6 +453,7 @@ class Forecaster:
     def forecast_auto_arima(self,test_length=1,Xvars=None,call_me='auto_arima'):
         """ Auto-Regressive Integrated Moving Average 
             forecasts using auto.arima from the forecast package in R
+            uses an algorithm to find the best ARIMA model automatically by minimizing in-sample aic, checks for seasonality (but doesn't work very well)
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -472,7 +473,7 @@ class Forecaster:
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
-        self._prepr('MLmetrics','forecast',test_length=test_length,call_me=call_me,Xvars=Xvars)
+        self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=Xvars)
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
@@ -505,7 +506,6 @@ class Forecaster:
             # f[[4]] are point estimates, f[[1]] is the ARIMA form
             p <- f[[4]]
             arima_form <- f[[1]]
-            mape <- MLmetrics::MAPE(p,y_test)
             write <- data.frame(actual=y_test,
                                 forecast=p)
             write$APE <- abs(write$actual - write$forecast) / write$actual
@@ -520,10 +520,10 @@ class Forecaster:
             arima_form <- f[[1]]
             
             write <- data.frame(forecast=p)
-            write$expected_mape <- mape
             write$model_form <- arima_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
         """)
+
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
         self.mape[call_me] = tmp_test_results['APE'].mean()
@@ -538,6 +538,7 @@ class Forecaster:
     def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',X13_PATH='auto'):
         """ Seasonal Auto-Regressive Integrated Moving Average - ARIMA-SEATS - https://www.census.gov/srd/www/x13as/
             Forecasts using the seas function from the seasonal package, also need the X13 software (x13as.exe) saved locally
+            Automatically takes the best model ARIMA model form that fulfills a certain set of criteria (low forecast error rate, high statistical significance, etc)
             X13 is a sophisticated way to model seasonality with ARIMA maintained by the census bureau, and the seasonal package provides a simple wrapper around the software with R
             The function here is simplified, but the power in X13 is its database offers precise ways to model seasonality, also takes into account outliers
             Documentation: https://cran.r-project.org/web/packages/seasonal/seasonal.pdf, http://www.seasonal.website/examples.html
@@ -556,7 +557,6 @@ class Forecaster:
                             if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
                             "top" is determined through absolute value of the pearson correlation coefficient on the training set
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
-                            "top Xvars" determined by absolute value of Pearson correlation coefficient to the dependent variable
                             if it is "all", will attempt to estimate a model with all available x regressors
                             because the function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
                             if no arima model can be estimated, will raise an error
@@ -573,7 +573,8 @@ class Forecaster:
         if X13_PATH == 'auto':
             X13_PATH = f'{rwd}/x13asall_V1.1_B39/x13as'
 
-        assert 'x13as.exe' in os.listdir(X13_PATH), 'x13as.exe not found. did you specify X13_PATH?'
+        try: os.listdir(X13_PATH)
+        except FileNotFoundError: raise FileNotFoundError('x13as.exe not found. did you specify X13_PATH?')
 
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
@@ -616,7 +617,7 @@ class Forecaster:
         """)
 
         ro.r(f"""
-            m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save = "forecasts")
+            m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save = "forecasts",pickmdl.method="best")
             p <- series(m_test, "forecast.forecasts")[1:test_length,]
 
             arima_form <- paste('ARIMA-SEATS',m_test$model$arima$model)
@@ -625,13 +626,20 @@ class Forecaster:
             write$model_form <- arima_form
             write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
 
-            m <- seas(x=y,xreg=all_externals_ts,forecast.save = "forecasts")
+            m <- seas(x=y,xreg=all_externals_ts,forecast.save = "forecasts",pickmdl.method="best")
             f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
             arima_form <- paste('ARIMA-SEATS',m$model$arima$model)
             
             write <- data.frame(forecast=f[,1])
             write$model_form <- arima_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+        """)
+
+        ro.r("""
+            # feature_importance -- cool output
+            summary_df <- data.frame(summary(m))
+            if (exists("externals")) {summary_df$term[1:length(externals)] <- externals}
+            write.csv(summary_df,'tmp/tmp_summary_output.csv',row.names=F)
         """)
 
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
@@ -644,6 +652,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+        self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
     def forecast_arima(self,test_length=1,Xvars=None,order=(0,0,0),seasonal_order=(0,0,0,0),trend=None,call_me='arima',**kwargs):
         """ ARIMA model from statsmodels: https://www.statsmodels.org/stable/generated/statsmodels.tsa.arima.model.ARIMA.html
@@ -652,7 +661,7 @@ class Forecaster:
             all other arguments in the ARIMA() function can be passed to kwargs
             using this framework, the following model types can be specified:
                 AR, MA, ARMA, ARIMA, SARIMA, regression with ARIMA errors
-            for a more automated arima implementation, see forecast_auto_arima() method
+            this is meant for manual arima modeling; for a more automated implementation, see the forecast_auto_arima() and forecast_sarimax13() methods
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -701,14 +710,7 @@ class Forecaster:
 
         arima = ARIMA(y,exog=X,order=order,seasonal_order=seasonal_order,trend=trend,dates=dates,**kwargs).fit()
         self.forecasts[call_me] = list(arima.predict(exog=X_f,start=len(y),end=len(y) + self.forecast_out_periods-1,typ='levels'))
-
-        if not Xvars is None:
-            feature_importance_df = pd.DataFrame(index=Xvars.copy(),columns=['PearsonR','Pval'])
-            for x in Xvars:
-                # maybe this isn't the best way to do it, but it makes controlling for stationarity straightforward
-                feature_importance_df.loc[x,['PearsonR','Pval']] = pearsonr(np.diff(np.log(self.current_xreg[x])) if min(self.current_xreg[x]) > 0 else self.current_xreg[x][1:],
-                                                                            np.diff(np.log(self.y)) if min(self.y) > 0 else self.y[1:])
-            self.feature_importance[call_me] = feature_importance_df.sort_values('Pval')
+        self.feature_importance[call_me] = arima.summary()
 
     def forecast_tbats(self,test_length=1,season='NULL',call_me='tbats'):
         """ Exponential Smoothing State Space Model With Box-Cox Transformation, ARMA Errors, Trend And Seasonal Component
@@ -727,7 +729,7 @@ class Forecaster:
         assert test_length >= 1, 'test_length must be at least 1'
 
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
-        self._prepr('MLmetrics','forecast',test_length=test_length,call_me=call_me,Xvars=None)
+        self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=None)
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
@@ -742,7 +744,6 @@ class Forecaster:
             # f[[2]] are point estimates, f[[9]] is the TBATS form
             p <- f[[2]]
             tbats_form <- f[[9]]
-            mape <- MLmetrics::MAPE(p,y_test)
             write <- data.frame(actual=y_test,
                                 forecast=p)
             write$APE <- abs(write$actual - write$forecast) / write$actual
@@ -755,7 +756,6 @@ class Forecaster:
             tbats_form <- f[[9]]
             
             write <- data.frame(forecast=p)
-            write$expected_mape <- mape
             write$model_form <- tbats_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
         """)
@@ -784,7 +784,7 @@ class Forecaster:
         assert test_length >= 1, 'test_length must be at least 1'
 
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
-        self._prepr('MLmetrics','forecast',test_length=test_length,call_me=call_me,Xvars=None)
+        self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=None)
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
@@ -799,7 +799,6 @@ class Forecaster:
             # f[[2]] are point estimates, f[[8]] is the ETS form
             p <- f[[2]]
             ets_form <- f[[8]]
-            mape <- MLmetrics::MAPE(p,y_test)
             write <- data.frame(actual=y_test,
                                 forecast=p)
             write$APE <- abs(write$actual - write$forecast) / write$actual
@@ -812,7 +811,6 @@ class Forecaster:
             ets_form <- f[[8]]
             
             write <- data.frame(forecast=p)
-            write$expected_mape <- mape
             write$model_form <- ets_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
         """)
@@ -849,7 +847,6 @@ class Forecaster:
                             if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
                             "top" is determined through absolute value of the pearson correlation coefficient on the training set
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
-                            "top Xvars" determined by absolute value of Pearson correlation coefficient to the dependent variable
                             if it is "all", will attempt to estimate a model with all available x regressors
                             because the VAR function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
                         lag_ic : str, one of "AIC", "HQ", "SC", "FPE"; default "AIC"
@@ -861,7 +858,7 @@ class Forecaster:
                             the number of periods to add a seasonal component to the model
                             if "NULL", no seasonal component will be added
                             don't use None ("NULL" is passed directly to the R CRAN mirror)
-                            example: if your data is monthly and you suspect seasonality, you would probably want to make this 12
+                            example: if your data is monthly and you suspect seasonality, you would make this 12
                         max_externals: int or None type, default None
                             the maximum number of externals to try in each model iteration
                             0 to this value of externals will be attempted and every combination of externals will be tried
@@ -1062,7 +1059,7 @@ class Forecaster:
                             the independent variables used to make predictions
                             if it is a list, will attempt to estimate a model with that list of Xvars
                             if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
-                            "top Xvars" determined by absolute value of Pearson correlation coefficient to the dependent variable
+                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
                             if it is "all", will attempt to estimate a model with all available x regressors
                             because the VECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
@@ -1120,7 +1117,7 @@ class Forecaster:
             else:
                 raise ValueError(f'Xvars argument {Xvars} not recognized')
 
-        self._prepr('MLmetrics','tsDyn',test_length=test_length,call_me=call_me,Xvars=Xvars)
+        self._prepr('tsDyn',test_length=test_length,call_me=call_me,Xvars=Xvars)
         cid_df.to_csv('tmp/tmp_r_cid.csv',index=False)
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
 
@@ -1259,9 +1256,8 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
                             must be at least 1 (AssertionError raised if not)
-                        Xvars : list or str, default "all"
+                        Xvars : list or "all", default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
                         call_me : str, default "rf"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
@@ -1288,9 +1284,8 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
                             must be at least 1 (AssertionError raised if not)
-                        Xvars : list or str, default "all"
+                        Xvars : list or "all", default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
                         call_me : str, default "rf"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
@@ -1317,9 +1312,8 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
                             must be at least 1 (AssertionError raised if not)
-                        Xvars : list or str, default "all"
+                        Xvars : list or "all", default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
                         call_me : str, default "rf"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
@@ -1346,9 +1340,8 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
                             must be at least 1 (AssertionError raised if not)
-                        Xvars : list or str, default "all"
+                        Xvars : list or "all", default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
                         call_me : str, default "mlp"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
@@ -1375,9 +1368,8 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
                             must be at least 1 (AssertionError raised if not)
-                        Xvars : list or str, default "all"
+                        Xvars : list or "all", default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
                         call_me : str, default "mlr"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         set_feature_importance : bool or any other data type, default True
@@ -1401,9 +1393,8 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
                             must be at least 1 (AssertionError raised if not)
-                        Xvars : list or str, default "all"
+                        Xvars : list or "all", default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
                         call_me : str, default "ridge"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         alpha : float, default 1.0
@@ -1430,9 +1421,8 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
                             must be at least 1 (AssertionError raised if not)
-                        Xvars : list or str, default "all"
+                        Xvars : list or "all", default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
                         call_me : str, default "lasso"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         alpha : float, default 1.0
@@ -1459,9 +1449,8 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the length of the resulting test_set
                             must be at least 1 (AssertionError raised if not)
-                        Xvars : list or str, default "all"
+                        Xvars : list or "all", default "all"
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
                         call_me : str, default "mlp"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         hyper_params : dict, default {}
@@ -1544,7 +1533,7 @@ class Forecaster:
             test_set_ape_df[m] = self.info[m]['test_set_ape'][-(test_length):] 
             forecasts[m] = self.forecasts[m]
             
-        self.info[call_me]['model_form'] = 'Average of ' + str(len(avg_these_models)) + ' models: ' + ' '.join(avg_these_models)
+        self.info[call_me]['model_form'] = 'Average of ' + str(len(avg_these_models)) + ' models: ' + ', '.join(avg_these_models)
         self.info[call_me]['test_set_predictions'] = list(test_set_predictions_df.mean(axis=1))
         self.info[call_me]['test_set_ape'] = list(test_set_ape_df.mean(axis=1))
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
@@ -1564,7 +1553,7 @@ class Forecaster:
 
     def set_best_model(self):
         """ sets the best forecast model based on which model has the lowest MAPE value for the given holdout periods
-            if two models tie, it will select 1 at random
+            if two or more models tie, it will select whichever one was evaluated first
         """
         self.best_model = Counter(self.mape).most_common()[-1][0]
 
@@ -1578,11 +1567,11 @@ class Forecaster:
     def display_ts_plot(self,models='all',print_model_form=False,print_mapes=False,print_covariates=False):
         """ Plots time series results of the stored forecasts
             All models plotted in order of best-to-worst mapes
-            Parameters: models : str or list, default "all"
+            Parameters: models : list, "all", or starts with "top_"; default "all"
                             the models you want plotted
                             if "all" plots all models
                             if list type, plots all models in the list
-                            if starts with "top_" reads the next character(s) as the top however models you want plotted
+                            if starts with "top_" reads the next character(s) as the top however models you want plotted (based on lowest MAPE values)
                         print_model_form : bool, default False
                             whether to print the model form to the console of the models being plotted
                         print_mapes : bool, default False
@@ -1590,7 +1579,6 @@ class Forecaster:
                         print_covariates : bool, default False 
                             whether to print the regressors used in the models being plotted
                             only works if the variable feature importance were written to self.feature_importance as a dataframe with the index being variable names
-                        ci : see seaborn documentation for ci
         """
         import matplotlib.pyplot as plt
         import seaborn as sns
@@ -1608,7 +1596,7 @@ class Forecaster:
         elif isinstance(models,list):
             plot_these_models = [m for m in self.order_all_forecasts_best_to_worst() if m in models]
         else:
-            raise ValueError(f'models must be a list or str type, got {type(models)}')
+            raise ValueError(f'models must be list or str, got {type(models)}')
 
         if (print_model_form) | (print_mapes) | (print_covariates):
             for m in plot_these_models:
