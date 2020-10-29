@@ -42,10 +42,11 @@ class Forecaster:
                         'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
                 in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
                 in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
-                in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a table or dataframe that gives some info about the features
-                    if it is an sklearn model, it will be permutation feature importance from the eli5 package
-                    if it is any other model, it will either be the pearson correlation coefficients and p-values or some summary output
-                    if a given model uses no regressors, there will be no key added here for that model
+                in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features' prediction power
+                    if it is an sklearn model, it will be permutation feature importance from the eli5 package (https://eli5.readthedocs.io/en/latest/blackbox/permutation_importance.html)
+                    any other model, it is summary output with at least the coefficient magnitudes
+                    index is always the feature names (depending on how the models were run, the index won't always be labeled with the explicit variable names, but still interpretable)
+                    if the model doesn't use external regressors, no key is added here
 
         Author Michael Keith: mikekeith52@gmail.com
     """
@@ -171,7 +172,7 @@ class Forecaster:
                 else:
                     self.set_ordered_xreg(chop_tail_periods=test_length) # have to reset here for differing test lengths in other models
                     if top_xreg > len(self.ordered_xreg):
-                        Xvars = self.ordered_xreg.copy()
+                        Xvars = self.ordered_xreg[:]
                     else:
                         Xvars = self.ordered_xreg[:top_xreg]
             elif Xvars == 'all':
@@ -179,14 +180,6 @@ class Forecaster:
             else:
                 print(f'Xvars argument not recognized: {Xvars}, changing to None')
                 Xvars = None
-
-        if not Xvars is None:
-            feature_importance_df = pd.DataFrame(index=Xvars.copy(),columns=['PearsonR','Pval'])
-            for x in Xvars:
-                # maybe this isn't the best way to do it, but it makes controlling for stationarity straightforward
-                feature_importance_df.loc[x,['PearsonR','Pval']] = pearsonr(np.diff(np.log(self.current_xreg[x])) if min(self.current_xreg[x]) > 0 else self.current_xreg[x][1:],
-                                                                            np.diff(np.log(self.y)) if min(self.y) > 0 else self.y[1:])
-            self.feature_importance[call_me] = feature_importance_df.sort_values('Pval')
 
         for lib in libs:
             try:  importr(lib)
@@ -523,6 +516,12 @@ class Forecaster:
             write$model_form <- arima_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
         """)
+        
+        ro.r("""
+            summary_df = data.frame(coef=rev(coef(ar)),se=rev(sqrt(diag(vcov(ar)))))
+            if (exists('externals')){row.names(summary_df)[1:length(externals)] <- externals}
+            write.csv(summary_df,'tmp/tmp_summary_output.csv')
+        """)
 
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
@@ -534,6 +533,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+        self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
     def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',X13_PATH='auto'):
         """ Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/
@@ -674,6 +674,12 @@ class Forecaster:
                             other arguments from ARIMA() function can be passed as keywords
         """
         from statsmodels.tsa.arima.model import ARIMA
+
+        def summary_to_df(sm_model):
+            results_summary = sm_model.summary()
+            results_as_html = results_summary.tables[1].as_html()
+            return pd.read_html(results_as_html, header=0, index_col=0)[0]
+
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
@@ -709,7 +715,7 @@ class Forecaster:
 
         arima = ARIMA(y,exog=X,order=order,seasonal_order=seasonal_order,trend=trend,dates=dates,**kwargs).fit()
         self.forecasts[call_me] = list(arima.predict(exog=X_f,start=len(y),end=len(y) + self.forecast_out_periods-1,typ='levels'))
-        self.feature_importance[call_me] = arima.summary()
+        self.feature_importance[call_me] = summary_to_df(arima)
 
     def forecast_tbats(self,test_length=1,season='NULL',call_me='tbats'):
         """ Exponential Smoothing State Space Model With Box-Cox Transformation, ARMA Errors, Trend And Seasonal Component
@@ -1002,7 +1008,7 @@ class Forecaster:
                   names(p)[i] <- paste0('series',i)
                 }
                 p$xreg <- as.character(best_params[1,'exogen'])[[1]]
-                p$model_form <- paste('VAR','include:',best_params[1,'include'])
+                p$model_form <- paste0('VAR',' include: ',best_params[1,'include'],'|selected regressors: ',as.character(best_params[1,'exogen'])[[1]])
 
                 write.csv(p,'tmp/tmp_test_results.csv',row.names=F)
 
@@ -1022,12 +1028,12 @@ class Forecaster:
                 }
                 # write final forecast values
                 write.csv(f,'tmp/tmp_forecast.csv',row.names=F)
+
+                summary_df <- coef(vc_train)[[1]]
+                write.csv(summary_df,'tmp/tmp_summary_output.csv')
         """)
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
-
-        used_xreg = tmp_test_results['xreg'].values[0].replace('c(','').replace(')','').replace('"','').replace(' ','').split(',')
-        self.feature_importance[call_me].drop(index=[i for i in self.feature_importance[call_me].index if i not in used_xreg],inplace=True)
 
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results.iloc[:,0])
@@ -1036,6 +1042,7 @@ class Forecaster:
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
         self.forecasts[call_me] = list(tmp_forecast.iloc[:,0])
+        self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
     def forecast_vecm(self,*cids,auto_resize=False,test_length=1,Xvars=None,r=1,max_lags=6,optimizer='AIC',max_externals=None,call_me='vecm'):
         """ Vector Error Correction Model
@@ -1217,7 +1224,11 @@ class Forecaster:
                                   exogen=ex_train)
                 p <- as.data.frame(predict(vc_train,n.ahead=test_periods,exoPred=ex_test))
                 p$xreg <- as.character(best_params[1,'exogen'])[[1]]
-                p$model_form <- paste('VECM',best_params[1,'lags'],'lags',best_params[1,'estim'],best_params[1,'include'])
+                p$model_form <- paste0('VECM with ',
+                                        best_params[1,'lags'],' lags',
+                                        '|estimator: ',best_params[1,'estim'],
+                                        '|include: ',best_params[1,'include'],
+                                        '|selected regressors: ',as.character(best_params[1,'exogen'])[[1]])
 
                 write.csv(p,'tmp/tmp_test_results.csv',row.names=F)
 
@@ -1234,13 +1245,13 @@ class Forecaster:
                 f <- as.data.frame(predict(vc.out,n.ahead=n_ahead,exoPred=ex_future))
                 # write final forecast values
                 write.csv(f,'tmp/tmp_forecast.csv',row.names=F)
+
+                summary_df <- t(coef(vc_train))
+                write.csv(summary_df,'tmp/tmp_summary_output.csv')
         """)
 
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
-
-        used_xreg = tmp_test_results['xreg'].values[0].replace('c(','').replace(')','').replace('"','').replace(' ','').split(',')
-        self.feature_importance[call_me].drop(index=[i for i in self.feature_importance[call_me].index if i not in used_xreg],inplace=True)
 
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results.iloc[:,0])
@@ -1249,6 +1260,7 @@ class Forecaster:
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
         self.forecasts[call_me] = list(tmp_forecast.iloc[:,0])
+        self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
     def forecast_rf(self,test_length=1,Xvars='all',call_me='rf',hyper_params={},set_feature_importance=True):
         """ forecasts the stored y variable with a random forest from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html)
@@ -1491,7 +1503,7 @@ class Forecaster:
         if models == 'all':
             avg_these_models = [e for e in list(self.mape.keys()) if (e != call_me) & (not e is None)]
         elif isinstance(models,list):
-            avg_these_models = models.copy()
+            avg_these_models = models[:]
         elif isinstance(models,str):
             if models.startswith('top_'):
                 ordered_models = [e for e in self.order_all_forecasts_best_to_worst() if (e != call_me) & (not e is None)]
@@ -1563,7 +1575,7 @@ class Forecaster:
         x = [h[0] for h in Counter(self.mape).most_common()]
         return x[::-1] # reversed copy of the list
 
-    def display_ts_plot(self,models='all',print_model_form=False,print_mapes=False,print_covariates=False):
+    def display_ts_plot(self,models='all',print_model_form=False,print_mapes=False):
         """ Plots time series results of the stored forecasts
             All models plotted in order of best-to-worst mapes
             Parameters: models : list, "all", or starts with "top_"; default "all"
@@ -1575,9 +1587,6 @@ class Forecaster:
                             whether to print the model form to the console of the models being plotted
                         print_mapes : bool, default False
                             whether to print the MAPEs to the console of the models being plotted
-                        print_covariates : bool, default False 
-                            whether to print the regressors used in the models being plotted
-                            only works if the variable feature importance were written to self.feature_importance as a dataframe with the index being variable names
         """
         import matplotlib.pyplot as plt
         import seaborn as sns
@@ -1597,15 +1606,13 @@ class Forecaster:
         else:
             raise ValueError(f'models must be list or str, got {type(models)}')
 
-        if (print_model_form) | (print_mapes) | (print_covariates):
+        if (print_model_form) | (print_mapes):
             for m in plot_these_models:
                 print_text = '{} '.format(m)
                 if print_model_form:
                     print_text += "model form: {} ".format(self.info[m]['model_form'])
                 if print_mapes:
                     print_text += "{}-period test-set MAPE: {} ".format(self.info[m]['holdout_periods'],self.mape[m])
-                if print_covariates:
-                    print_text += "regressors: {}".format(self.feature_importance[m].index.to_list() if m in self.feature_importance else None)
                 print(print_text)
 
         sns.lineplot(x=pd.to_datetime(self.current_dates),y=self.y,ci=None)
