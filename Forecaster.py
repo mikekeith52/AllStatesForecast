@@ -23,7 +23,7 @@ class Forecaster:
             multi level perceptron (sklearn)
             arima (statsmodels)
             arima (R forecast pkg: auto.arima)
-            arima-seats (R seasonal pkg: seas)
+            arima-x13 (R seasonal pkg: seas)
             tbats (R forecast pkg: tbats)
             ets (R forecast pkg: ets)
             vecm (R tsDyn pkg: VECM)
@@ -536,7 +536,7 @@ class Forecaster:
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
 
     def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',X13_PATH='auto'):
-        """ Seasonal Auto-Regressive Integrated Moving Average - ARIMA-SEATS - https://www.census.gov/srd/www/x13as/
+        """ Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/
             Forecasts using the seas function from the seasonal package, also need the X13 software (x13as.exe) saved locally
             Automatically takes the best model ARIMA model form that fulfills a certain set of criteria (low forecast error rate, high statistical significance, etc)
             X13 is a sophisticated way to model seasonality with ARIMA maintained by the census bureau, and the seasonal package provides a simple wrapper around the software with R
@@ -617,18 +617,18 @@ class Forecaster:
         """)
 
         ro.r(f"""
-            m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save = "forecasts",pickmdl.method="best")
+            m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
             p <- series(m_test, "forecast.forecasts")[1:test_length,]
 
-            arima_form <- paste('ARIMA-SEATS',m_test$model$arima$model)
+            arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
             write <- data.frame(actual=y_test,forecast=p[,1])
             write$APE <- abs(write$actual - write$forecast) / write$actual
             write$model_form <- arima_form
             write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
 
-            m <- seas(x=y,xreg=all_externals_ts,forecast.save = "forecasts",pickmdl.method="best")
+            m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
             f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
-            arima_form <- paste('ARIMA-SEATS',m$model$arima$model)
+            arima_form <- paste('ARIMA-X13',m$model$arima$model)
             
             write <- data.frame(forecast=f[,1])
             write$model_form <- arima_form
@@ -667,12 +667,11 @@ class Forecaster:
                             must be at least 1 (AssertionError raised if not)
                         Xvars : list, "all", or None default None
                             the independent variables to use in the resulting X dataframes
-                            if it is a str, must be "all"
                             "top_" not supported
                         call_me : str, default "arima"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         Info about all other arguments (order, seasonal_order, trend) can be found in the sm.tsa.arima.model.ARIMA documentation (linked above)
-                        Any other argument from ARIMA() function can be passed as keywords
+                            other arguments from ARIMA() function can be passed as keywords
         """
         from statsmodels.tsa.arima.model import ARIMA
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
