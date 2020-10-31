@@ -676,6 +676,8 @@ class Forecaster:
         from statsmodels.tsa.arima.model import ARIMA
 
         def summary_to_df(sm_model):
+            """ https://stackoverflow.com/questions/51734180/converting-statsmodels-summary-object-to-pandas-dataframe/52976810
+            """
             results_summary = sm_model.summary()
             results_as_html = results_summary.tables[1].as_html()
             return pd.read_html(results_as_html, header=0, index_col=0)[0]
@@ -1486,7 +1488,7 @@ class Forecaster:
 
     def forecast_average(self,models='all',call_me='average',test_length='max'):
         """ averages a set of models to make a new estimator
-            Parameters: models : str or list, if str one of "all" or starts with "top_", default "all"
+            Parameters: models : list, "all", or starts with "top_", default "all"
                             "all" will average all models
                             starts with "top_" will average the top however many models are specified according to their respective MAPE values on the test set (lower = better)
                                 the character after "top_" must be an integer
@@ -1508,7 +1510,6 @@ class Forecaster:
             if models.startswith('top_'):
                 ordered_models = [e for e in self.order_all_forecasts_best_to_worst() if (e != call_me) & (not e is None)]
                 avg_these_models = [m for i, m in enumerate(ordered_models) if (i+1) <= int(models.split('_')[1])]
-
         else:
             raise ValueError(f'argument in models parameter not recognized: {models}')
             
