@@ -535,7 +535,7 @@ class Forecaster:
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
-    def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',X13_PATH='auto'):
+    def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',X13_PATH='auto',error='raise'):
         """ Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/
             Forecasts using the seas function from the seasonal package, also need the X13 software (x13as.exe) saved locally
             Automatically takes the best model ARIMA model form that fulfills a certain set of criteria (low forecast error rate, high statistical significance, etc)
@@ -543,7 +543,8 @@ class Forecaster:
             The function here is simplified, but the power in X13 is its database offers precise ways to model seasonality, also takes into account outliers
             Documentation: https://cran.r-project.org/web/packages/seasonal/seasonal.pdf, http://www.seasonal.website/examples.html
             This package only allows for monthly or less granular observations, and only three years or fewer of predictions
-            Parameters: start : tuple of length 2, default "auto"
+            when a series does not have a lot of seasonality, sometimes the model fails, also when it tries to add the same outlier in two different ways
+            Parameters: start : tuple of length 2 or "auto", default "auto"
                             1st element is the start year
                             2nd element is the start period in the appropriate interval
                             for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)
@@ -566,6 +567,10 @@ class Forecaster:
                             the local location of the x13as.exe executable
                             if "auto", assumes it is saved in {local_directory}/x13asall_V1.1_B39/x13as
                             be sure to use front slashes (/) and not backslashes (\\) to keep R happy
+                        error: one of {"raise","pass","print"}, default "raise"
+                            if unable to estimate the model, "raise" will raise an error
+                            if unable to estimate the model, "pass" will silently skip the model and delete all associated attribute keys (self.info)
+                            if unable to estimate the model, "print" will skip the model, delete all associated attribute keys (self.info), and print the error
         """
         if start == 'auto':
             try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
@@ -581,66 +586,78 @@ class Forecaster:
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         self._prepr('forecast','seasonal',test_length=test_length,call_me=call_me,Xvars=Xvars)
 
-        ro.r(f"""
-            rm(list=ls())
-            Sys.setenv(X13_PATH = '{X13_PATH}')
-            setwd('{rwd}')
-            start_p <- c{start}
-            interval <- {interval}
-            test_length <- {test_length}
-            
-            data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
-            
-            y <- ts(data$y,start=start_p,deltat=1/interval)
-            y_train <- subset(y,start=1,end=nrow(data)-test_length)
-            y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
-            
+        try:
+            ro.r(f"""
+                rm(list=ls())
+                Sys.setenv(X13_PATH = '{X13_PATH}')
+                setwd('{rwd}')
+                start_p <- c{start}
+                interval <- {interval}
+                test_length <- {test_length}
+                
+                data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
+                
+                y <- ts(data$y,start=start_p,deltat=1/interval)
+                y_train <- subset(y,start=1,end=nrow(data)-test_length)
+                y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
+                
+                """)
+
+            ro.r("""
+                if (ncol(data) > 1){
+                  future_externals = data.frame(read.csv('tmp/tmp_r_future.csv'))
+                  r <- max(0,36-nrow(future_externals))
+                  filler <-as.data.frame(replicate(ncol(future_externals),rep(0,r))) # we always need at least three years of data for this package
+                  # if we have less than three years, fill in the rest with 0s
+                  # we still only use predictions matching whatever is stored in self.forecast_out_periods
+                  # https://github.com/christophsax/seasonal/issues/200
+                  names(filler) <- names(future_externals)
+                  future_externals <- rbind(future_externals,filler)
+                  externals <- names(data)[2:ncol(data)]
+                  data_c <- data[,externals, drop=FALSE]
+                  data_f <- future_externals[,externals, drop=FALSE]
+                  all_externals_ts <- ts(rbind(data_c,data_f),start=start_p,deltat=1/interval)
+                } else {
+                  all_externals_ts <- NULL
+                }
             """)
 
-        ro.r("""
-            if (ncol(data) > 1){
-              future_externals = data.frame(read.csv('tmp/tmp_r_future.csv'))
-              r <- max(0,36-nrow(future_externals))
-              filler <-as.data.frame(replicate(ncol(future_externals),rep(0,r))) # we always need at least three years of data for this package
-              # if we have less than three years, fill in the rest with 0s
-              # we still only use predictions matching whatever is stored in self.forecast_out_periods
-              # https://github.com/christophsax/seasonal/issues/200
-              names(filler) <- names(future_externals)
-              future_externals <- rbind(future_externals,filler)
-              externals <- names(data)[2:ncol(data)]
-              data_c <- data[,externals, drop=FALSE]
-              data_f <- future_externals[,externals, drop=FALSE]
-              all_externals_ts <- ts(rbind(data_c,data_f),start=start_p,deltat=1/interval)
-            } else {
-              all_externals_ts <- NULL
-            }
-        """)
+            ro.r(f"""
+                m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
+                p <- series(m_test, "forecast.forecasts")[1:test_length,]
 
-        ro.r(f"""
-            m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
-            p <- series(m_test, "forecast.forecasts")[1:test_length,]
+                arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
+                write <- data.frame(actual=y_test,forecast=p[,1])
+                write$APE <- abs(write$actual - write$forecast) / write$actual
+                write$model_form <- arima_form
+                write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
 
-            arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
-            write <- data.frame(actual=y_test,forecast=p[,1])
-            write$APE <- abs(write$actual - write$forecast) / write$actual
-            write$model_form <- arima_form
-            write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+                m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
+                f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
+                arima_form <- paste('ARIMA-X13',m$model$arima$model)
+                
+                write <- data.frame(forecast=f[,1])
+                write$model_form <- arima_form
+                write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+            """)
 
-            m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
-            f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
-            arima_form <- paste('ARIMA-X13',m$model$arima$model)
-            
-            write <- data.frame(forecast=f[,1])
-            write$model_form <- arima_form
-            write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
-        """)
-
-        ro.r("""
-            # feature_importance -- cool output
-            summary_df <- data.frame(summary(m))
-            if (exists("externals")) {summary_df$term[1:length(externals)] <- externals}
-            write.csv(summary_df,'tmp/tmp_summary_output.csv',row.names=F)
-        """)
+            ro.r("""
+                # feature_importance -- cool output
+                summary_df <- data.frame(summary(m))
+                if (exists("externals")) {summary_df$term[1:length(externals)] <- externals}
+                write.csv(summary_df,'tmp/tmp_summary_output.csv',row.names=F)
+            """)
+        except Exception as e:
+            if error == 'raise':
+                raise e
+            else:
+                self.info.pop(call_me)
+                if error == 'print':
+                    print(f"skipping model, here's the error:\n{e}")
+                elif error != 'pass':
+                    print(f'error argument not recognized: {error}')
+                    raise e
+                return None
 
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
