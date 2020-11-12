@@ -14,8 +14,4 @@ Builds the Forecaster object to create easily accessed forecasts for many time s
 
 ## Installation (Windows Specific)
 - Run all commands in requirements.txt on command line
-
-## rpy2
-- Installing rpy2 can be tricky, you will need to have an R CRAN installed to PATH and add R_HOME and R_USER to your environment variables (if using Windows)
-  - R_USER (on my PC) : C:\Users\michaelkeith\Anaconda3\Lib\site-packages\rpy2
-  - R_HOME (on my PC) : C:\Users\michaelkeith\Documents\R\R-4.0.2
+- You may get an error when trying to install rpy2--This can be for a variety of reasons. Google is your friend!

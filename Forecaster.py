@@ -13,23 +13,23 @@ class Forecaster:
     """ object to forecast time series data
         natively supports the extraction of FRED data, could be expanded to other APIs with few adjustments
         the following models are supported:
-            random forest (sklearn)
             adaboost (sklearn)
-            gradient boosted trees (sklearn)
-            support vector regressor (sklearn)
-            ridge (sklearn)
-            lasso (sklearn)
-            multi linear regression (sklearn)
-            multi level perceptron (sklearn)
-            arima (statsmodels)
             arima (R forecast pkg: auto.arima)
+            arima (statsmodels)
             arima-x13 (R seasonal pkg: seas)
-            tbats (R forecast pkg: tbats)
-            ets (R forecast pkg: ets)
-            vecm (R tsDyn pkg: VECM)
-            var (R vars pkg: VAR)
             average (any number of models can be averaged)
+            ets (R forecast pkg: ets)
+            gradient boosted trees (sklearn)
+            lasso (sklearn)
+            multi level perceptron (sklearn)
+            multi linear regression (sklearn)
             naive (propagates final observed value forward)
+            random forest (sklearn)
+            ridge (sklearn)
+            support vector regressor (sklearn)
+            tbats (R forecast pkg: tbats)
+            var (R vars pkg: VAR)      
+            vecm (R tsDyn pkg: VECM)
         more models can be added by building more methods
 
         for every evaluated model, the following information is stored in the object attributes:
@@ -215,7 +215,7 @@ class Forecaster:
         self.name = series
         df = pdr.get_data_fred(series,start=date_start)
         self.y = list(df[series])
-        self.current_dates = list(pd.to_datetime(df.index))
+        self.current_dates = df.index.to_list()
 
     def process_xreg_df(self,xreg_df,date_col=None,process_missing_columns=False,**kwargs):
         """ takes a dataframe of external regressors
@@ -688,7 +688,7 @@ class Forecaster:
                         call_me : str, default "arima"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         Info about all other arguments (order, seasonal_order, trend) can be found in the sm.tsa.arima.model.ARIMA documentation (linked above)
-                            other arguments from ARIMA() function can be passed as keywords
+                        other arguments from ARIMA() function can be passed as keywords
         """
         from statsmodels.tsa.arima.model import ARIMA
 
