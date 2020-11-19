@@ -455,10 +455,9 @@ class Forecaster:
                             if it is a list, will attempt to estimate a model with that list of Xvars
                             if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
                             "top" is determined through absolute value of the pearson correlation coefficient on the training set
-                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
-                            if it is "all", will attempt to estimate a model with all available x regressors
-                            "top Xvars" determined by absolute value of Pearson correlation coefficient to the dependent variable
-                            because the function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
+                            if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation
+                            because the auto.arima function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option
                             if no arima model can be estimated, will raise an error
                         call_me : str, default "auto_arima"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
@@ -557,10 +556,10 @@ class Forecaster:
                             if it is a list, will attempt to estimate a model with that list of Xvars
                             if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
                             "top" is determined through absolute value of the pearson correlation coefficient on the training set
-                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
-                            if it is "all", will attempt to estimate a model with all available x regressors
-                            because the function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
-                            if no arima model can be estimated, will raise an error
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
+                            if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation
+                            because the seas function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option
+                            x13 already has an extensive list of x regressors that it will pull automatically--read the documentation for more info
                         call_me : str, default "sarimax13"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         X13_PATH : str, default "auto"
@@ -571,6 +570,7 @@ class Forecaster:
                             if unable to estimate the model, "raise" will raise an error
                             if unable to estimate the model, "pass" will silently skip the model and delete all associated attribute keys (self.info)
                             if unable to estimate the model, "print" will skip the model, delete all associated attribute keys (self.info), and print the error
+                            errors are common even if you specify everything correctly -- it has to do with the X13 estimator itself
         """
         if start == 'auto':
             try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
