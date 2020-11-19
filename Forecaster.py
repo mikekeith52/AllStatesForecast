@@ -997,7 +997,7 @@ class Forecaster:
                   grid[i,'ic'] <-  IC(vc_train)
                 }
 
-                # choose parameters where MAPE is smallest
+                # choose parameters with best IC
                 best_params <- grid[grid$ic == min(grid$ic),]
 
                 # set externals
@@ -1217,7 +1217,7 @@ class Forecaster:
                   grid[i,'ic'] <-  IC(vc_train)
                 }
 
-                # choose parameters where MAPE is smallest
+                # choose parameters with best IC
                 best_params <- grid[grid$ic == min(grid$ic),]
 
                 # set externals
