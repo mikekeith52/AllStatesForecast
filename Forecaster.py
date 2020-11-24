@@ -372,7 +372,7 @@ class Forecaster:
                     for k,v in self.future_xreg.items():
                         self.future_xreg[k] = v[:n]
             else:
-              raise ValueError(f'n must be greater than 1, got {n}')  
+                raise ValueError(f'n must be greater than 1, got {n}')  
         else:
             raise ValueError(f'n must be an int type, got {type(n)}')
 
