@@ -102,7 +102,7 @@ class Forecaster:
         pred = regr.predict(X_test)
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = list(pred)
-        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / y for yhat, y in zip(pred,y_test)]
+        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
         regr.fit(X,y)
         new_data = pd.DataFrame(self.future_xreg)
@@ -462,6 +462,7 @@ class Forecaster:
                         call_me : str, default "auto_arima"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
+        from scipy import stats
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
@@ -500,7 +501,7 @@ class Forecaster:
             arima_form <- f[[1]]
             write <- data.frame(actual=y_test,
                                 forecast=p)
-            write$APE <- abs(write$actual - write$forecast) / write$actual
+            write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
             write$model_form <- arima_form
             write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
         """)
@@ -519,6 +520,7 @@ class Forecaster:
         ro.r("""
             summary_df = data.frame(coef=rev(coef(ar)),se=rev(sqrt(diag(vcov(ar)))))
             if (exists('externals')){row.names(summary_df)[1:length(externals)] <- externals}
+            summary_df$tvalue = summary_df$coef/summary_df$se
             write.csv(summary_df,'tmp/tmp_summary_output.csv')
         """)
 
@@ -533,6 +535,11 @@ class Forecaster:
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
+
+        if self.feature_importance[call_me].shape[0] > 0: # for the (0,i,0) model case
+            self.feature_importance[call_me]['pval'] = stats.t.sf(np.abs(self.feature_importance[call_me]['tvalue']), len(self.y)-1)*2 # https://stackoverflow.com/questions/17559897/python-p-value-from-t-statistic
+        else:
+            self.feature_importance.pop(call_me)
 
     def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',X13_PATH='auto',error='raise'):
         """ Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/
@@ -551,6 +558,9 @@ class Forecaster:
                         interval : 1 of {1,2,4,12}, default 12
                             1 for annual, 2 for bi-annual, 4 for quarterly, 12 for monthly
                             unfortunately, x13 does not allow for more granularity than the monthly level
+                        test_length : int, default 1
+                            the number of periods to holdout in order to test the model
+                            must be at least 1 (AssertionError raised if not)
                         Xvars : list, "all", None, or starts with "top_", default None
                             the independent variables used to make predictions
                             if it is a list, will attempt to estimate a model with that list of Xvars
@@ -578,86 +588,81 @@ class Forecaster:
         if X13_PATH == 'auto':
             X13_PATH = f'{rwd}/x13asall_V1.1_B39/x13as'
 
-        try: os.listdir(X13_PATH)
-        except FileNotFoundError: raise FileNotFoundError('x13as.exe not found. did you specify X13_PATH?')
-
+        assert os.path.exists(X13_PATH + '/x13as.exe'), 'x13as.exe not found. did you specify X13_PATH?'
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
         self._prepr('forecast','seasonal',test_length=test_length,call_me=call_me,Xvars=Xvars)
 
+        ro.r(f"""
+            rm(list=ls())
+            Sys.setenv(X13_PATH = '{X13_PATH}')
+            setwd('{rwd}')
+            start_p <- c{start}
+            interval <- {interval}
+            test_length <- {test_length}
+            
+            data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
+            
+            y <- ts(data$y,start=start_p,deltat=1/interval)
+            y_train <- subset(y,start=1,end=nrow(data)-test_length)
+            y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
+            
+            """)
+
+        ro.r("""
+            if (ncol(data) > 1){
+              future_externals = data.frame(read.csv('tmp/tmp_r_future.csv'))
+              r <- max(0,36-nrow(future_externals))
+              filler <-as.data.frame(replicate(ncol(future_externals),rep(0,r))) # we always need at least three years of data for this package
+              # if we have less than three years, fill in the rest with 0s
+              # we still only use predictions matching whatever is stored in self.forecast_out_periods
+              # https://github.com/christophsax/seasonal/issues/200
+              names(filler) <- names(future_externals)
+              future_externals <- rbind(future_externals,filler)
+              externals <- names(data)[2:ncol(data)]
+              data_c <- data[,externals, drop=FALSE]
+              data_f <- future_externals[,externals, drop=FALSE]
+              all_externals_ts <- ts(rbind(data_c,data_f),start=start_p,deltat=1/interval)
+            } else {
+              all_externals_ts <- NULL
+            }
+        """)
+
         try:
             ro.r(f"""
-                rm(list=ls())
-                Sys.setenv(X13_PATH = '{X13_PATH}')
-                setwd('{rwd}')
-                start_p <- c{start}
-                interval <- {interval}
-                test_length <- {test_length}
-                
-                data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
-                
-                y <- ts(data$y,start=start_p,deltat=1/interval)
-                y_train <- subset(y,start=1,end=nrow(data)-test_length)
-                y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
-                
-                """)
-
-            ro.r("""
-                if (ncol(data) > 1){
-                  future_externals = data.frame(read.csv('tmp/tmp_r_future.csv'))
-                  r <- max(0,36-nrow(future_externals))
-                  filler <-as.data.frame(replicate(ncol(future_externals),rep(0,r))) # we always need at least three years of data for this package
-                  # if we have less than three years, fill in the rest with 0s
-                  # we still only use predictions matching whatever is stored in self.forecast_out_periods
-                  # https://github.com/christophsax/seasonal/issues/200
-                  names(filler) <- names(future_externals)
-                  future_externals <- rbind(future_externals,filler)
-                  externals <- names(data)[2:ncol(data)]
-                  data_c <- data[,externals, drop=FALSE]
-                  data_f <- future_externals[,externals, drop=FALSE]
-                  all_externals_ts <- ts(rbind(data_c,data_f),start=start_p,deltat=1/interval)
-                } else {
-                  all_externals_ts <- NULL
-                }
-            """)
-
-            ro.r(f"""
-                m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
-                p <- series(m_test, "forecast.forecasts")[1:test_length,]
-
-                arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
-                write <- data.frame(actual=y_test,forecast=p[,1])
-                write$APE <- abs(write$actual - write$forecast) / write$actual
-                write$model_form <- arima_form
-                write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
-
-                m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
-                f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
-                arima_form <- paste('ARIMA-X13',m$model$arima$model)
-                
-                write <- data.frame(forecast=f[,1])
-                write$model_form <- arima_form
-                write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
-            """)
-
-            ro.r("""
-                # feature_importance -- cool output
-                summary_df <- data.frame(summary(m))
-                if (exists("externals")) {summary_df$term[1:length(externals)] <- externals}
-                write.csv(summary_df,'tmp/tmp_summary_output.csv',row.names=F)
+                    m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
+                    p <- series(m_test, "forecast.forecasts")[1:test_length,]
+                    m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
+                    f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
+                    arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
+                    write <- data.frame(actual=y_test,forecast=p[,1])
+                    write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
+                    write$model_form <- arima_form
+                    write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+                    arima_form <- paste('ARIMA-X13',m$model$arima$model)
+                    write <- data.frame(forecast=f[,1])
+                    write$model_form <- arima_form
+                    write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
             """)
         except Exception as e:
+            self.info.pop(call_me)
             if error == 'raise':
                 raise e
             else:
-                self.info.pop(call_me)
                 if error == 'print':
                     print(f"skipping model, here's the error:\n{e}")
                 elif error != 'pass':
                     print(f'error argument not recognized: {error}')
                     raise e
                 return None
+
+        ro.r("""
+            # feature_importance -- cool output
+            summary_df <- data.frame(summary(m))
+            if (exists("externals")) {summary_df$term[1:length(externals)] <- externals}
+            write.csv(summary_df,'tmp/tmp_summary_output.csv',row.names=F)
+        """)
 
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
@@ -729,7 +734,7 @@ class Forecaster:
         self.info[call_me]['model_form'] = 'ARIMA {}x{} include {}'.format(order,seasonal_order,trend)
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
-        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / y for yhat, y in zip(pred,y_test)]
+        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
 
         arima = ARIMA(y,exog=X,order=order,seasonal_order=seasonal_order,trend=trend,dates=dates,**kwargs).fit()
@@ -770,7 +775,7 @@ class Forecaster:
             tbats_form <- f[[9]]
             write <- data.frame(actual=y_test,
                                 forecast=p)
-            write$APE <- abs(write$actual - write$forecast) / write$actual
+            write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
             write$model_form <- tbats_form
             write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
 
@@ -825,7 +830,7 @@ class Forecaster:
             ets_form <- f[[8]]
             write <- data.frame(actual=y_test,
                                 forecast=p)
-            write$APE <- abs(write$actual - write$forecast) / write$actual
+            write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
             write$model_form <- ets_form
             write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
 
@@ -1057,7 +1062,7 @@ class Forecaster:
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results.iloc[:,0])
         self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
-        self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / y for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
+        self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
         self.forecasts[call_me] = list(tmp_forecast.iloc[:,0])
@@ -1275,7 +1280,7 @@ class Forecaster:
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results.iloc[:,0])
         self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
-        self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / y for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
+        self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
         self.forecasts[call_me] = list(tmp_forecast.iloc[:,0])
@@ -1503,7 +1508,7 @@ class Forecaster:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
 
-    def forecast_average(self,models='all',call_me='average',test_length='max'):
+    def forecast_average(self,models='all',exclude=None,call_me='average',test_length='max'):
         """ averages a set of models to make a new estimator
             Parameters: models : list, "all", or starts with "top_", default "all"
                             "all" will average all models
@@ -1511,6 +1516,10 @@ class Forecaster:
                                 the character after "top_" must be an integer
                                 ex. "top_5"
                             if list, then those are the models that will be averaged
+                        exclude : list, default None
+                            manually exlcude some models
+                            all models passed here will be excluded
+                            if models parameters starts with "top" and one of those top models is in the list passed to exclude, that model will be excluded 
                         call_me : str, default "average"
                             what to call the evaluated model -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         test_length : int or "max", default "max"
@@ -1529,6 +1538,12 @@ class Forecaster:
                 avg_these_models = [m for i, m in enumerate(ordered_models) if (i+1) <= int(models.split('_')[1])]
         else:
             raise ValueError(f'argument in models parameter not recognized: {models}')
+
+        if not exclude is None:
+            if not isinstance(exclude,list):
+                raise TypeError(f'exclude must be a list or None, not {type(exclude)}')
+            else:
+                avg_these_models = [m for m in avg_these_models if m not in exclude]
             
         if len(avg_these_models) == 0:
             print('no models found to average')
@@ -1543,7 +1558,7 @@ class Forecaster:
         else:
             assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
             assert test_length >= 1, 'test_length must be at least 1'
-        
+
         self.mape[call_me] = 1
         self.forecasts[call_me] = [None]*self.forecast_out_periods
 
@@ -1556,7 +1571,6 @@ class Forecaster:
         forecasts = pd.DataFrame()
         test_set_predictions_df = pd.DataFrame()
         test_set_ape_df = pd.DataFrame()
-
         for m in avg_these_models:
             test_set_predictions_df[m] = self.info[m]['test_set_predictions'][-(test_length):]
             test_set_ape_df[m] = self.info[m]['test_set_ape'][-(test_length):] 
