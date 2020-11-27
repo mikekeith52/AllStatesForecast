@@ -211,13 +211,15 @@ class Forecaster:
                         date_start : str
                             the date to begin the time series
                             must be in YYYY-mm-dd format
+            >>> f = Forecaster()
+            >>> f.get_data_fred('UTUR')
         """
         self.name = series
         df = pdr.get_data_fred(series,start=date_start)
         self.y = list(df[series])
         self.current_dates = df.index.to_list()
 
-    def process_xreg_df(self,xreg_df,date_col=None,process_missing_columns=False,**kwargs):
+    def process_xreg_df(self,xreg_df,date_col,process_missing_columns=False,**kwargs):
         """ takes a dataframe of external regressors
             any non-numeric data will be made into a 0/1 binary variable (using pd.get_dummies(drop_first=True))
             deals with columns with missing data
@@ -228,11 +230,10 @@ class Forecaster:
             for more complex processing, perform manipulations before passing through this function
             stores results in self.xreg
             Parameters: xreg_df : pandas dataframe
-                        date_col : str, default None
-                            the date column in xreg_df, if applicable
-                            if None, assumes none of the columns are dates (if this is not the case, can cause bad results)
-                            if None, assumes all dataframe obs start at the same time as self.y
-                            if str, will use that column to resize the dataset to line up with self.current_dates and all future obs stored in self.future_xreg and self.future_dates
+                        date_col : str, requried
+                            the name of the date column in xreg_df, if applicable
+                            if no date column available, pas None -- assumes none of the columns are dates and that all dataframe obs start at the same time as self.y
+                            always better to pass a date column when available
                         process_missing_columns : str, dict, or bool
                             how to process columns with missing data
                             if str, one of 'remove','impute_mean','impute_median','impute_mode','forward_fill','backward_fill','impute_w_nearest_neighbors'
@@ -242,6 +243,20 @@ class Forecaster:
                             if bool, only False supported -- False means this will be ignored, any unsupported argument raises an error
                         all keywords passed to the KNeighborsClassifier function (https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsClassifier.html)
                             not relevant if not using this algorithm to impute missing values
+            >>> xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
+            >>> f = Forecaster(y=[4,5,9],current_dates=['2020-01-01','2020-02-01','2020-03-01'])
+            >>> f.process_xreg_df(xreg_df,date_col='date')
+            >>> print(f.current_xreg)
+            {'x1':[1,2,3],'x2':[1,3,3]}
+
+            >>> print(f.future_xreg)
+            {'x1':[5],'x2':[3]}
+
+            >>> print(f.future_dates)
+            ['2020-04-01']
+
+            >>> print(f.forecast_out_periods)
+            1
         """
         def _remove_(c):
             xreg_df.drop(columns=c,inplace=True)
@@ -324,7 +339,7 @@ class Forecaster:
             current_xreg_df = xreg_df.iloc[:len(self.y)]
             future_xreg_df = xreg_df.iloc[len(self.y):]
 
-        assert current_xreg_df.shape[0] == len(self.y), 'passed x regressors are not the same length as y'
+        assert current_xreg_df.shape[0] == len(self.y), 'something is wrong with the passed dataframe--make sure the dataframe is at least one observation greater in length than y and specify a date column if one available'
         self.forecast_out_periods = future_xreg_df.shape[0]
         self.current_xreg = current_xreg_df.to_dict(orient='list')
         self.future_xreg = future_xreg_df.to_dict(orient='list')
@@ -398,6 +413,12 @@ class Forecaster:
                         quiet : bool, default True
                             if this is True, then if a given external is ignored (either because no correlation could be calculated or there are no observations after its tail has been chopped), you will not know
                             if this is False, then if a given external is ignored, it will print which external is being skipped
+            >>> f = Forecaster()
+            >>> f.get_data_fred('UTUR')
+            >>> f.process_xreg_df(xreg_df,chop_tail_periods=12)
+            >>> f.set_ordered_xreg()
+            >>> print(f.ordered_xreg)
+            [x2,x1] # in this case x2 correlates more strongly than x1 with y on a test set with 12 holdout periods
         """
         def log_diff(x):
             """ returns the logged difference of an array
@@ -461,6 +482,29 @@ class Forecaster:
                             if no arima model can be estimated, will raise an error
                         call_me : str, default "auto_arima"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+            >>> f = Forecaster()
+            >>> f.get_data_fred('UTUR')
+            >>> f.forecast_auto_arima(test_length=12,call_me='arima')
+            >>> print(f.info['arima'])
+            {'holdout_periods': 12, 
+            'model_form': 'ARIMA(0,1,5)',
+            'test_set_actuals': [2.4, 2.4, ..., 5.0, 4.1],
+            'test_set_predictions': [2.36083282553252, 2.3119957980461803, ..., 2.09177057271149, 2.08127132827637], 
+            'test_set_ape': [0.0163196560281154, 0.03666841748076, ..., 0.581645885457702, 0.49237284676186205]}
+
+            >>> print(f.forecasts['arima'])
+            [4.000616524942799, 4.01916650578768, ..., 3.7576542462753904, 3.7576542462753904]
+            
+            >>> print(f.mape['arima'])
+            0.4082393522799069
+
+            >>> print(f.feature_importance['arima'])
+                coef        se    tvalue          pval
+            ma5  0.189706  0.045527  4.166858  3.598788e-05
+            ma4 -0.032062  0.043873 -0.730781  4.652316e-01
+            ma3 -0.060743  0.048104 -1.262753  2.072261e-01
+            ma2 -0.257684  0.044522 -5.787802  1.213441e-08
+            ma1  0.222933  0.042513  5.243861  2.265347e-07
         """
         from scipy import stats
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -581,6 +625,7 @@ class Forecaster:
                             if unable to estimate the model, "pass" will silently skip the model and delete all associated attribute keys (self.info)
                             if unable to estimate the model, "print" will skip the model, delete all associated attribute keys (self.info), and print the error
                             errors are common even if you specify everything correctly -- it has to do with the X13 estimator itself
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         if start == 'auto':
             try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
@@ -694,6 +739,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         Info about all other arguments (order, seasonal_order, trend) can be found in the sm.tsa.arima.model.ARIMA documentation (linked above)
                         other arguments from ARIMA() function can be passed as keywords
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from statsmodels.tsa.arima.model import ARIMA
 
@@ -753,6 +799,7 @@ class Forecaster:
                             if no seasonality desired, leave "NULL" as this will be passed directly to the tbats function in r
                         call_me : str, default "tbats"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
@@ -808,6 +855,7 @@ class Forecaster:
                             must be at least 1 (AssertionError raised if not)
                         call_me : str, default "ets"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
@@ -878,9 +926,9 @@ class Forecaster:
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors
                             if it is "all", will attempt to estimate a model with all available x regressors
                             because the VAR function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
-                        lag_ic : str, one of "AIC", "HQ", "SC", "FPE"; default "AIC"
+                        lag_ic : str, one of {"AIC", "HQ", "SC", "FPE"}; default "AIC"
                             the information criteria used to determine the optimal number of lags in the VAR function
-                        optimizer : str, one of "AIC","BIC"; default "AIC"
+                        optimizer : str, one of {"AIC","BIC"}; default "AIC"
                             the information criteria used to select the best model in the optimization grid
                             a good, short resource to understand the difference: https://www.methodology.psu.edu/resources/AIC-vs-BIC/
                         season : int, default "NULL"
@@ -895,6 +943,7 @@ class Forecaster:
                             reducing this from None can speed up processing and reduce overfitting
                         call_me : str, default "var"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         if len(series) == 0:
             raise ValueError('cannot run var -- need at least 1 series passed to *series')
@@ -909,13 +958,12 @@ class Forecaster:
                 s = s[(len(s) - min_size):]
             elif not not auto_resize:
                 raise ValueError(f'argument in auto_resize not recognized: {auto_resize}')
-            series_df[f'cid{i+1}'] = s # cid for cointegrated data because I copied and pasted this from forecast_vecm
+            series_df[f'cid{i+1}'] = s
 
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-
-        if optimizer not in ('AIC','BIC'):
-            raise ValueError(f'cannot estimate model - optimizer value of {optimizer} not recognized')
+        assert optimizer in ('AIC','BIC'), f'cannot estimate model - optimizer value of {optimizer} not recognized'
+        assert lag_ic in ("AIC", "HQ", "SC", "FPE"), f'cannot estimate model - lag_ic value of {lag_ic} not recognized'
 
         if (max_externals is None) & (not Xvars is None):
             if isinstance(Xvars,list):
@@ -926,9 +974,6 @@ class Forecaster:
                 max_externals = int(Xvars.split('_')[1])
             else:
                 raise ValueError(f'Xvars argument {Xvars} not recognized')
-
-        if lag_ic not in ("AIC", "HQ", "SC", "FPE"):
-            raise ValueError(f'cannot estimate model - optimizer value of {optimizer} not recognized')
 
         self._prepr('vars',test_length=test_length,call_me=call_me,Xvars=Xvars)
         series_df.to_csv('tmp/tmp_r_cid.csv',index=False)
@@ -1100,7 +1145,7 @@ class Forecaster:
                             the total number of lags that will be used in the optimization process
                             1 to this number will be attempted
                             if not an int or less than 0, an AssertionError is raised
-                        optimizer : str, one of "AIC","BIC"; default "AIC"
+                        optimizer : str, one of {"AIC","BIC"}; default "AIC"
                             the information criteria used to select the best model in the optimization grid
                             a good, short resource to understand the difference: https://www.methodology.psu.edu/resources/AIC-vs-BIC/
                         max_externals: int or None type, default None
@@ -1110,7 +1155,7 @@ class Forecaster:
                             reducing this from None can speed up processing and reduce overfitting
                         call_me : str, default "vecm"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         if len(cids) == 0:
             raise ValueError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids--no list found')
@@ -1133,9 +1178,7 @@ class Forecaster:
         assert test_length >= 1, 'test_length must be at least 1'
         assert isinstance(max_lags,int), f'max_lags must be an int, not {type(max_lags)}'
         assert max_lags >= 0, 'max_lags must be positive'
-
-        if optimizer not in ('AIC','BIC'):
-            raise ValueError(f'cannot estimate model - optimizer value of {optimizer} not recognized')
+        assert optimizer in ('AIC','BIC'), f'cannot estimate model - optimizer value of {optimizer} not recognized'
 
         if (max_externals is None) & (not Xvars is None):
             if isinstance(Xvars,list):
@@ -1302,6 +1345,7 @@ class Forecaster:
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.ensemble import RandomForestRegressor
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1330,6 +1374,7 @@ class Forecaster:
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.ensemble import GradientBoostingRegressor
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1358,6 +1403,7 @@ class Forecaster:
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.ensemble import AdaBoostRegressor
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1386,6 +1432,7 @@ class Forecaster:
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.neural_network import MLPRegressor
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1411,6 +1458,7 @@ class Forecaster:
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.linear_model import LinearRegression
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1439,6 +1487,7 @@ class Forecaster:
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.linear_model import Ridge
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1467,6 +1516,7 @@ class Forecaster:
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.linear_model import Lasso
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1495,6 +1545,7 @@ class Forecaster:
                             if True, adds a key to self.feature_importance with the call_me parameter as a key
                             value is the feature_importance dataframe from eli5 in a pandas dataframe data type
                             not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.svm import SVR
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1527,6 +1578,7 @@ class Forecaster:
                             if max, it will use the maximum test_length that all saved models can support
                             if int, will use that many test periods
                             if int is greater than one of the stored models' test length, this will fail
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         if models == 'all':
             avg_these_models = [e for e in list(self.mape.keys()) if (e != call_me) & (not e is None)]
@@ -1589,6 +1641,7 @@ class Forecaster:
                         mape : float, default 1.0
                             the MAPE to assign to the model -- since the model is not tested, this should be some arbitrarily high number
                             if a numeric type is not passed, a value error is raised
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         self.mape[call_me] = float(mape)
         self.forecasts[call_me] = [self.y[-1]]*self.forecast_out_periods
