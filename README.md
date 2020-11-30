@@ -12,6 +12,6 @@ Builds the Forecaster object to create easily accessed forecasts for many time s
 - This framework can be expanded to such use cases with minimal adjustments--instead of modeling based on your beliefs about a recession, you may add a vector of holidays or recurring dates that you believe affect the metrics you are attempting to forecast
 - In this forecast, there isn't much consideration of seasonality (two of the models account for that automatically), but that is something you need to think about
 
-## Installation (Windows Specific)
-- Run all commands in requirements.txt on command line
-- You may get an error when trying to install rpy2--This can be for a variety of reasons. Google is your friend!
+## Installation
+- Be running Python 3.6+ on an [Anaconda](https://www.anaconda.com/products/individual) interpreter
+- Run all commands in requirements.txt on command line/terminal
