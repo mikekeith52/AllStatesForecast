@@ -140,9 +140,9 @@ class Forecaster:
         """ returns the permutation feature importances of any regression model in a pandas dataframe
             leverages eli5 package (https://pypi.org/project/eli5/)
             only works within an sklearn forecast method
-            Parameters: X : pd.core.frame.DataFrame
+            Parameters: X : pandas dataFrame
                             X regressors used to predict the depdendent variable
-                        y : pd.Series
+                        y : pandas series
                             y series representing the known values of the dependent variable
                         regr : sklearn estimator
                             the estimator to use to score the permutation feature importance
@@ -213,6 +213,11 @@ class Forecaster:
                             must be in YYYY-mm-dd format
             >>> f = Forecaster()
             >>> f.get_data_fred('UTUR')
+            >>> print(f.y)
+            [5.8, 5.8, ..., 5.0, 4.1]
+
+            >>> print(f.current_dates)
+            [Timestamp('1976-01-01 00:00:00'), Timestamp('1976-02-01 00:00:00'), ..., Timestamp('2020-09-01 00:00:00'), Timestamp('2020-10-01 00:00:00')]
         """
         self.name = series
         df = pdr.get_data_fred(series,start=date_start)
@@ -236,11 +241,13 @@ class Forecaster:
                             always better to pass a date column when available
                         process_missing_columns : str, dict, or bool
                             how to process columns with missing data
-                            if str, one of 'remove','impute_mean','impute_median','impute_mode','forward_fill','backward_fill','impute_w_nearest_neighbors'
-                            if dict, key is a column name and value is one of 'remove','impute_mean','impute_median','impute_mode','forward_fill','backward_fill','impute_w_nearest_neighbors'
+                            if str, one of 'remove','impute_mean','impute_median','impute_mode','impute_0','forward_fill','backward_fill','impute_w_nearest_neighbors'
+                            if dict, key is a column name and value is one of 'remove','impute_mean','impute_median','impute_mode','impute_0','forward_fill','backward_fill','impute_w_nearest_neighbors'
                             if str, one method applied to all columns
                             if dict, the selected methods only apply to column names in the dictionary
                             if bool, only False supported -- False means this will be ignored, any unsupported argument raises an error
+                            'remove' means the entire column will be removed
+                            no option for removing rows since they all should correspond with dates in the object
                         all keywords passed to the KNeighborsClassifier function (https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsClassifier.html)
                             not relevant if not using this algorithm to impute missing values
             >>> xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
@@ -267,6 +274,8 @@ class Forecaster:
         def _impute_mode_(c):
             from scipy.stats import mode
             xreg_df[c].fillna(mode(xreg_df[c])[0][0],inplace=True)
+        def _impute_0_(c):
+            xreg_df[c].fillna(0,inplace=True)
         def _forward_fill_(c):
             xreg_df[c].fillna(method='ffill',inplace=True)
         def _backward_fill_(c):
@@ -301,6 +310,8 @@ class Forecaster:
                         _impute_median_(c)
                     elif v == 'impute_mode':
                         _impute_mode_(c)
+                    elif v == 'impute_0':
+                        _impute_0_(c)
                     elif v == 'forward_fill':
                         _forward_fill_(c)
                     elif v == 'backward_fill':
@@ -321,6 +332,8 @@ class Forecaster:
                             _impute_median_(c)
                         elif process_missing_columns == 'impute_mode':
                             _impute_mode_(c)
+                        elif process_missing_columns == 'impute_0':
+                            _impute_0_(c)
                         elif process_missing_columns == 'forward_fill':
                             _forward_fill_(c)
                         elif process_missing_columns == 'backward_fill':
@@ -498,7 +511,7 @@ class Forecaster:
             >>> print(f.mape['arima'])
             0.4082393522799069
 
-            >>> print(f.feature_importance['arima'])
+            >>> print(f.feature_importance['arima']) # stored as a pandas dataframe
                 coef        se    tvalue          pval
             ma5  0.189706  0.045527  4.166858  3.598788e-05
             ma4 -0.032062  0.043873 -0.730781  4.652316e-01
@@ -1700,16 +1713,18 @@ class Forecaster:
                     print_text += "{}-period test-set MAPE: {} ".format(self.info[m]['holdout_periods'],self.mape[m])
                 print(print_text)
 
-        sns.lineplot(x=pd.to_datetime(self.current_dates),y=self.y,ci=None)
+        # plots with dates if dates are available, else plots with ambiguous integers
+        sns.lineplot(x=pd.to_datetime(self.current_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.y)),y=self.y,ci=None)
         labels = ['Actual']
 
         for m in plot_these_models:
-            sns.lineplot(x=pd.to_datetime(self.future_dates),y=self.forecasts[m])
+            # plots with dates if dates are available, else plots with ambiguous integers
+            sns.lineplot(x=pd.to_datetime(self.future_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.forecasts[m])),y=self.forecasts[m])
             labels.append(m)
 
         plt.legend(labels=labels,loc='best')
         plt.xlabel('Date')
-        plt.ylabel(f'{self.name}')
+        plt.ylabel('{}'.format(self.name if not self.name is None else ''))
         plt.title(f'{self.name} Forecast Results')
         plt.show()
 
