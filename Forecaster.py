@@ -224,32 +224,31 @@ class Forecaster:
         self.y = list(df[series])
         self.current_dates = df.index.to_list()
 
-    def process_xreg_df(self,xreg_df,date_col,process_missing_columns=False,**kwargs):
+    def process_xreg_df(self,xreg_df,date_col,process_columns=False):
         """ takes a dataframe of external regressors
-            any non-numeric data will be made into a 0/1 binary variable (using pd.get_dummies(drop_first=True))
+            any non-numeric data will be made into a 0/1 binary variable (using pandas.get_dummies(drop_first=True))
             deals with columns with missing data
             eliminates rows that don't correspond with self.y's timeframe
-            splits values between the future and current xregs
-            changes self.forecast_out_periods
+            splits values between future and current observations
+            changes self.forecast_out_periods based on how many periods included in the dataframe pass self.current_dates
             assumes the dataframe is aggregated to the same timeframe as self.y (monthly, quarterly, etc.)
             for more complex processing, perform manipulations before passing through this function
-            stores results in self.xreg
+            stores results in self.current_xreg, self.future_xreg, self.future_dates, and self.forecast_out_periods
             Parameters: xreg_df : pandas dataframe
+            				this should include only independent regressors either in numeric form or that can be dummied into a 1/0 variable as well as a date column that can be parsed by pandas
+            				do not include the dependent variable value
                         date_col : str, requried
-                            the name of the date column in xreg_df, if applicable
-                            if no date column available, pas None -- assumes none of the columns are dates and that all dataframe obs start at the same time as self.y
+                            the name of the date column in xreg_df that can be parsed with the pandas.to_datetime() function, if available
+                            if no date column available, pass None -- assumes none of the columns are dates and that all dataframe obs start at the same time as self.y
                             always better to pass a date column when available
-                        process_missing_columns : str, dict, or bool
+                        process_columns : str, dict, or False
                             how to process columns with missing data
-                            if str, one of 'remove','impute_mean','impute_median','impute_mode','impute_0','forward_fill','backward_fill','impute_w_nearest_neighbors'
-                            if dict, key is a column name and value is one of 'remove','impute_mean','impute_median','impute_mode','impute_0','forward_fill','backward_fill','impute_w_nearest_neighbors'
-                            if str, one method applied to all columns
+                            if str, one of {'remove','impute_mean','impute_median','impute_mode','impute_0','forward_fill','backward_fill'}
+                            if dict, key is a column name and value is one of {'remove','impute_mean','impute_median','impute_mode','impute_0','forward_fill','backward_fill'}
+                            if str, one method applied to all columns                        
                             if dict, the selected methods only apply to column names in the dictionary
-                            if bool, only False supported -- False means this will be ignored, any unsupported argument raises an error
-                            'remove' means the entire column will be removed
-                            no option for removing rows since they all should correspond with dates in the object
-                        all keywords passed to the KNeighborsClassifier function (https://scikit-learn.org/stable/modules/generated/sklearn.neighbors.KNeighborsClassifier.html)
-                            not relevant if not using this algorithm to impute missing values
+                            'remove' will only remove columns with missing data, except when the column is explicitly passed as a dict key, then it will always be removed
+           
             >>> xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
             >>> f = Forecaster(y=[4,5,9],current_dates=['2020-01-01','2020-02-01','2020-03-01'])
             >>> f.process_xreg_df(xreg_df,date_col='date')
@@ -260,7 +259,7 @@ class Forecaster:
             {'x1':[5],'x2':[3]}
 
             >>> print(f.future_dates)
-            ['2020-04-01']
+            [Timestamp('2020-04-01 00:00:00')]
 
             >>> print(f.forecast_out_periods)
             1
@@ -280,18 +279,6 @@ class Forecaster:
             xreg_df[c].fillna(method='ffill',inplace=True)
         def _backward_fill_(c):
             xreg_df[c].fillna(method='bfill',inplace=True)
-        def _impute_w_nearest_neighbors_(c):
-            from sklearn.neighbors import KNeighborsClassifier
-            predictors=[e for e in xreg_df if len(xreg_df[e].dropna())==len(xreg_df[e])] # predictor columns can have no NAs
-            predictors=[e for e in predictors if e != c] # predictor columns cannot be the same as the column to impute (this should be taken care of in the line above, but jic)
-            predictors=[e for e in predictors if xreg_df[e].dtype in (np.int32,np.int64,np.float32,np.float64,int,float)] # predictor columns must be numeric -- good idea to dummify as many columns as possible
-            clf = KNeighborsClassifier(**kwargs)
-            df_complete = xreg_df.loc[xreg_df[c].isnull()==False]
-            df_nulls = xreg_df.loc[xreg_df[c].isnull()]
-            trained_model = clf.fit(df_complete[predictors],df_complete[c])
-            imputed_values = trained_model.predict(df_nulls[predictors])
-            df_nulls[c] = imputed_values
-            xreg_df[c] = pd.concat(df_complete[c],df_nulls[c])
 
         if not date_col is None:
             xreg_df[date_col] = pd.to_datetime(xreg_df[date_col])
@@ -299,10 +286,10 @@ class Forecaster:
             xreg_df = xreg_df.loc[xreg_df[date_col] >= self.current_dates[0]]
         xreg_df = pd.get_dummies(xreg_df,drop_first=True)
 
-        if not not process_missing_columns:
-            if isinstance(process_missing_columns,dict):
-                for c, v in process_missing_columns.items():
-                    if (v == 'remove') & (xreg_df[c].isnull().sum() > 0):
+        if not not process_columns:
+            if isinstance(process_columns,dict):
+                for c, v in process_columns.items():
+                    if (v == 'remove'):
                         _remove_(c)
                     elif v == 'impute_mean':
                         _impute_mean_(c)
@@ -316,34 +303,29 @@ class Forecaster:
                         _forward_fill_(c)
                     elif v == 'backward_fill':
                         _backward_fill_(c)
-                    elif v == 'impute_w_nearest_neighbors':
-                        _impute_w_nearest_neighbors_(c)
                     else:
-                        raise ValueError(f'argument {v} not supported for columns {c} in process_missing')
-
-            elif isinstance(process_missing_columns,str):
+                        raise ValueError(f'argument {v} not supported for column {c} in process_columns')
+            elif isinstance(process_columns,str):
                 for c in xreg_df:
                     if xreg_df[c].isnull().sum() > 0:
-                        if process_missing_columns == 'remove':
+                        if process_columns == 'remove':
                             _remove_(c)
-                        elif process_missing_columns == 'impute_mean':
+                        elif process_columns == 'impute_mean':
                             _impute_mean_(c)
-                        elif process_missing_columns == 'impute_median':
+                        elif process_columns == 'impute_median':
                             _impute_median_(c)
-                        elif process_missing_columns == 'impute_mode':
+                        elif process_columns == 'impute_mode':
                             _impute_mode_(c)
-                        elif process_missing_columns == 'impute_0':
+                        elif process_columns == 'impute_0':
                             _impute_0_(c)
-                        elif process_missing_columns == 'forward_fill':
+                        elif process_columns == 'forward_fill':
                             _forward_fill_(c)
-                        elif process_missing_columns == 'backward_fill':
+                        elif process_columns == 'backward_fill':
                             _backward_fill_(c)
-                        elif process_missing_columns == 'impute_w_nearest_neighbors':
-                            _impute_w_nearest_neighbors_(c)
                         else:
-                            raise ValueError(f'argument passed to process_missing not recogized: {process_missing}')
+                            raise ValueError(f'argument passed to process_columns not recogized: {process_columns}')
             else:
-                raise ValueError(f'argument passed to process_missing not recogized: {process_missing}')
+                raise ValueError(f'argument passed to process_columns not recogized: {process_columns}')
 
         if not date_col is None:
             current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
@@ -377,6 +359,7 @@ class Forecaster:
         """ checks that the self.y is same size as self.current_dates
             checks that self.y is same size as the values in self.current_xreg
             checks that self.future_dates is same size as the values in self.future_xreg
+            checks if there are missing values in the xreg dictionary values
             if any of these checks fails, raises an AssertionError
         """
         for k, v in self.current_xreg.items():
@@ -384,6 +367,7 @@ class Forecaster:
             assert len(self.current_xreg[k]) == len(self.y), f'the length of {k} ({len(v)}) stored in the current_xreg dict is not the same length as y ({len(self.y)})'
             assert k in self.future_xreg.keys(), f'{k} not found in the future_xreg dict!'
             assert len(self.future_xreg[k]) == len(self.future_dates), f'the length of {k} ({len(self.future_xreg[k])}) stored in the future_xreg dict is not the same length as future_dates ({len(self.future_dates)})'
+            assert np.isnan(v).sum() == 0, f'missing values observed in current_xreg dictionary: {k} key for (up to first 5) dates {[d for d, val in zip(self.current_dates,np.isnan(v)) if val][:5]}'
 
     def set_forecast_out_periods(self,n):
         """ sets the self.forecast_out_periods attribute and truncates self.future_dates and self.future_xreg if needed
