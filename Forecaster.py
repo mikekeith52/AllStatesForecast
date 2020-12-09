@@ -3,7 +3,7 @@ import numpy as np
 import os
 import pandas_datareader as pdr
 from collections import Counter
-from scipy.stats import pearsonr
+from scipy import stats
 import rpy2.robjects as ro
 
 # make the working directory friendly for R
@@ -50,8 +50,7 @@ class Forecaster:
 
         Author Michael Keith: mikekeith52@gmail.com
     """
-    def __init__(self,name=None,y=None,current_dates=None,future_dates=None,
-                 current_xreg=None,future_xreg=None,forecast_out_periods=24,**kwargs):
+    def __init__(self,name=None,y=None,current_dates=None,future_dates=None,current_xreg=None,future_xreg=None,forecast_out_periods=24,**kwargs):
         """ You can load the object with data using __init__ or you can leave all default arguments and load the data with an attached API method (such as get_data_fred())
             Parameters: name : str
                         y : list
@@ -243,11 +242,10 @@ class Forecaster:
                             always better to pass a date column when available
                         process_columns : str, dict, or False
                             how to process columns with missing data
-                            if str, one of {'remove','impute_mean','impute_median','impute_mode','impute_0','forward_fill','backward_fill'}
-                            if dict, key is a column name and value is one of {'remove','impute_mean','impute_median','impute_mode','impute_0','forward_fill','backward_fill'}
-                            if str, one method applied to all columns                        
-                            if dict, the selected methods only apply to column names in the dictionary
-                            'remove' will only remove columns with missing data, except when the column is explicitly passed as a dict key, then it will always be removed
+                            supported: {'remove','impute_mean','impute_median','impute_mode','impute_min','impute_max',impute_0','forward_fill','backward_fill','impute_random'}
+                            if str, must be one of supported and that method is applied to all columns with missing data
+                            if dict, key is a column and value is one of supported, method only applied to columns with missing data                  
+                            'impute_random' will fill in missing values with random values from the same column
            
             >>> xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
             >>> f = Forecaster(y=[4,5,9],current_dates=['2020-01-01','2020-02-01','2020-03-01'])
@@ -264,21 +262,17 @@ class Forecaster:
             >>> print(f.forecast_out_periods)
             1
         """
-        def _remove_(c):
-            xreg_df.drop(columns=c,inplace=True)
-        def _impute_mean_(c):
-            xreg_df[c].fillna(xreg_df[c].mean(),inplace=True)
-        def _impute_median_(c):
-            xreg_df[c].fillna(xreg_df[c].median(),inplace=True)
-        def _impute_mode_(c):
-            from scipy.stats import mode
-            xreg_df[c].fillna(mode(xreg_df[c])[0][0],inplace=True)
-        def _impute_0_(c):
-            xreg_df[c].fillna(0,inplace=True)
-        def _forward_fill_(c):
-            xreg_df[c].fillna(method='ffill',inplace=True)
-        def _backward_fill_(c):
-            xreg_df[c].fillna(method='bfill',inplace=True)
+        # for other processing methods, add a function here that follows the same pattern and it should flow down automatically
+        def _remove_(c): xreg_df.drop(columns=c,inplace=True)
+        def _impute_mean_(c): xreg_df[c].fillna(xreg_df[c].mean(),inplace=True)
+        def _impute_median_(c): xreg_df[c].fillna(xreg_df[c].median(),inplace=True)
+        def _impute_mode_(c): xreg_df[c].fillna(stats.mode(xreg_df[c])[0][0],inplace=True)
+        def _impute_min_(c): xreg_df[c].fillna(xreg_df[c].min(),inplace=True)
+        def _impute_max_(c): xreg_df[c].fillna(xreg_df[c].max(),inplace=True)
+        def _impute_0_(c): xreg_df[c].fillna(0,inplace=True)
+        def _forward_fill_(c): xreg_df[c].fillna(method='ffill',inplace=True)
+        def _backward_fill_(c): xreg_df[c].fillna(method='bfill',inplace=True)
+        def _impute_random_(c): xreg_df.loc[xreg_df[c].isnull(),c] = xreg_df[c].dropna().sample(xreg_df.loc[xreg_df[c].isnull()].shape[0]).to_list()
 
         if not date_col is None:
             xreg_df[date_col] = pd.to_datetime(xreg_df[date_col])
@@ -289,43 +283,14 @@ class Forecaster:
         if not not process_columns:
             if isinstance(process_columns,dict):
                 for c, v in process_columns.items():
-                    if (v == 'remove'):
-                        _remove_(c)
-                    elif v == 'impute_mean':
-                        _impute_mean_(c)
-                    elif v == 'impute_median':
-                        _impute_median_(c)
-                    elif v == 'impute_mode':
-                        _impute_mode_(c)
-                    elif v == 'impute_0':
-                        _impute_0_(c)
-                    elif v == 'forward_fill':
-                        _forward_fill_(c)
-                    elif v == 'backward_fill':
-                        _backward_fill_(c)
-                    else:
-                        raise ValueError(f'argument {v} not supported for column {c} in process_columns')
+                    try: locals()['_'+v+'_'](c) if xreg_df[c].isnull().sum() > 0 else None
+                    except KeyError: raise ValueError(f'argument {v} not supported for key {c} in process_columns')
             elif isinstance(process_columns,str):
                 for c in xreg_df:
-                    if xreg_df[c].isnull().sum() > 0:
-                        if process_columns == 'remove':
-                            _remove_(c)
-                        elif process_columns == 'impute_mean':
-                            _impute_mean_(c)
-                        elif process_columns == 'impute_median':
-                            _impute_median_(c)
-                        elif process_columns == 'impute_mode':
-                            _impute_mode_(c)
-                        elif process_columns == 'impute_0':
-                            _impute_0_(c)
-                        elif process_columns == 'forward_fill':
-                            _forward_fill_(c)
-                        elif process_columns == 'backward_fill':
-                            _backward_fill_(c)
-                        else:
-                            raise ValueError(f'argument passed to process_columns not recogized: {process_columns}')
+                    try: locals()['_'+process_columns+'_'](c) if xreg_df[c].isnull().sum() > 0 else None
+                    except KeyError: raise ValueError(f'argument passed to process_columns not supported: {process_columns}')
             else:
-                raise ValueError(f'argument passed to process_columns not recogized: {process_columns}')
+                raise ValueError(f'argument passed to process_columns not supported: {process_columns}')
 
         if not date_col is None:
             current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
@@ -342,9 +307,10 @@ class Forecaster:
     def set_and_check_data_types(self,check_xreg=True):
         """ changes all attributes in self to the object type they should be (list, str, dict, etc.)
             if a conversion is unsuccessful, will raise an error
+            good idea to run this before beginning forecasts in case something in the object isn't loaded the way it should be
             Parameters: check_xreg : bool, default True
                 if True, checks that self.current_xreg and self.future_xregs are dict types (raises an error if check fails)
-                change this to False if wanting to perform auto-regressive forecasts only
+                change this to False if wanting to perform forecasts without any predictors
         """
         self.name = str(self.name) if not isinstance(self.name,str) else self.name
         self.y = list(self.y) if not isinstance(self.y,list) else self.y
@@ -361,6 +327,7 @@ class Forecaster:
             checks that self.future_dates is same size as the values in self.future_xreg
             checks if there are missing values in the xreg dictionary values
             if any of these checks fails, raises an AssertionError
+            good idea to run this right after loading the xreg_df to make sure that process was successful
         """
         for k, v in self.current_xreg.items():
             assert len(self.y) == len(self.current_dates), f'the length of y ({len(self.y)}) and the length of current_dates ({len(self.current_dates)}) do not match!'
@@ -415,12 +382,9 @@ class Forecaster:
             >>> f.process_xreg_df(xreg_df,chop_tail_periods=12)
             >>> f.set_ordered_xreg()
             >>> print(f.ordered_xreg)
-            [x2,x1] # in this case x2 correlates more strongly than x1 with y on a test set with 12 holdout periods
+            ['x2','x1'] # in this case x2 correlates more strongly than x1 with y on a test set with 12 holdout periods
         """
-        def log_diff(x):
-            """ returns the logged difference of an array
-            """
-            return np.diff(np.log(x),n=1)
+        log_diff = lambda x: np.diff(np.log(x),n=1)
 
         if isinstance(include_only,list):
             use_these_externals = {}
@@ -453,7 +417,7 @@ class Forecaster:
                     print(f'no variation in {k} for time period specified')
                 continue
             else: 
-                r_coeff = pearsonr(y,x)
+                r_coeff = stats.pearsonr(y,x)
             
             if np.abs(r_coeff[0]) not in ext_reg.values():
                 ext_reg[k] = np.abs(r_coeff[0])
@@ -503,7 +467,6 @@ class Forecaster:
             ma2 -0.257684  0.044522 -5.787802  1.213441e-08
             ma1  0.222933  0.042513  5.243861  2.265347e-07
         """
-        from scipy import stats
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
