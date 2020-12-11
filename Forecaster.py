@@ -202,6 +202,14 @@ class Forecaster:
             future_df = pd.DataFrame(self.future_xreg)
             future_df.to_csv(f'tmp/tmp_r_future.csv',index=False)
 
+    def _sm_summary_to_fi(self,sm_model,call_me):
+        """ places summary output from a stasmodels model into self.feature_importance as a pandas dataframe
+            https://stackoverflow.com/questions/51734180/converting-statsmodels-summary-object-to-pandas-dataframe/52976810
+        """
+        results_summary = sm_model.summary()
+        results_as_html = results_summary.tables[1].as_html()
+        self.feature_importance[call_me] = pd.read_html(results_as_html, header=0, index_col=0)[0]
+
     def get_data_fred(self,series,date_start='1900-01-01'):
         """ imports data from FRED into a pandas dataframe
             stores the results in self.name, self.y, and self.current_dates
@@ -703,13 +711,6 @@ class Forecaster:
         """
         from statsmodels.tsa.arima.model import ARIMA
 
-        def summary_to_df(sm_model):
-            """ https://stackoverflow.com/questions/51734180/converting-statsmodels-summary-object-to-pandas-dataframe/52976810
-            """
-            results_summary = sm_model.summary()
-            results_as_html = results_summary.tables[1].as_html()
-            return pd.read_html(results_as_html, header=0, index_col=0)[0]
-
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
@@ -745,7 +746,45 @@ class Forecaster:
 
         arima = ARIMA(y,exog=X,order=order,seasonal_order=seasonal_order,trend=trend,dates=dates,**kwargs).fit()
         self.forecasts[call_me] = list(arima.predict(exog=X_f,start=len(y),end=len(y) + self.forecast_out_periods-1,typ='levels'))
-        self.feature_importance[call_me] = summary_to_df(arima)
+        self._sm_summary_to_fi(arima,call_me)
+
+    def forecast_hwes(self,test_length=1,call_me='hwes',**kwargs):
+        """ Holt-Winters Exponential Smoothing
+            https://www.statsmodels.org/stable/generated/statsmodels.tsa.holtwinters.ExponentialSmoothing.html
+            https://towardsdatascience.com/holt-winters-exponential-smoothing-d703072c0572
+            The Holt-Winters ES modifies the Holt ES technique so that it can be used in the presence of both trend and seasonality.
+            Parameters: test_length : int, default 1
+                            the number of periods to holdout in order to test the model
+                            must be at least 1 (AssertionError raised if not)
+                        call_me : str, default "hwes"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+            keywords are passed to the HWES function from statsmodels -- `dates` is specified automatically
+            some important parameters to specify as key words: trend, damped_trend, seasonal, seasonal_periods, use_boxcox
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
+        """
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing as HWES
+
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+
+        y = pd.Series(self.y)
+        y_train = y.values[:-test_length]
+        y_test = y.values[-test_length:]
+        dates = pd.to_datetime(self.current_dates) if not self.current_dates is None else None
+
+        hwes_train = HWES(y_train,dates=dates,**kwargs).fit(optimized=True,use_brute=True)
+        pred = list(hwes_train.predict(start=len(y_train),end=len(y)-1))
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['model_form'] = 'Holt-Winters Exponential Smoothing {}'.format(kwargs)
+        self.info[call_me]['test_set_actuals'] = list(y_test)
+        self.info[call_me]['test_set_predictions'] = pred
+        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
+        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+
+        hwes = HWES(y,dates=dates,**kwargs).fit(optimized=True,use_brute=True)
+        self.forecasts[call_me] = list(hwes.predict(start=len(y),end=len(y) + self.forecast_out_periods-1))
+        self._sm_summary_to_fi(hwes,call_me)
 
     def forecast_tbats(self,test_length=1,season='NULL',call_me='tbats'):
         """ Exponential Smoothing State Space Model With Box-Cox Transformation, ARMA Errors, Trend And Seasonal Component
