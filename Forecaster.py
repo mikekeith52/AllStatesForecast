@@ -20,6 +20,7 @@ class Forecaster:
             average (any number of models can be averaged)
             ets (R forecast pkg: ets)
             gradient boosted trees (sklearn)
+            holt-winters exponential smoothing (statsmodels)
             lasso (sklearn)
             multi level perceptron (sklearn)
             multi linear regression (sklearn)
