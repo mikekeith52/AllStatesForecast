@@ -807,8 +807,6 @@ class Forecaster:
                             ignored if seasonal is False
                         call_me : str, default "hwes"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-                        keywords are passed to the ExponentialSmoothing function from statsmodels -- `dates` is specified automatically
-                        some important parameters to specify as key words: trend, damped_trend, seasonal, seasonal_periods, use_boxcox
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from statsmodels.tsa.holtwinters import ExponentialSmoothing as HWES
@@ -838,21 +836,20 @@ class Forecaster:
             'trend':[None,'add','mul'],
             'seasonal':[None] if not seasonal else ['add','mul'],
             'damped_trend':[True,False],
-            'use_boxcox':[True,False,1/2.718281828], # the last one is euler's number -- meant to approximate a natural log transformation
+            'use_boxcox':[True,False,0],
             'seasonal_periods':[None] if not seasonal_periods else [seasonal_periods]
         })
 
-        grid = grid.loc[(~grid['trend'].isnull()) & (grid['damped_trend'] == False)].reset_index(drop=True)
+        grid = grid.loc[((grid['trend'].isnull()) & (grid['damped_trend'] == False)) | (~grid['trend'].isnull())].reset_index(drop=True) # it does not know how to damp when there is no trend
 
         for i, v in grid.iterrows():
             params = dict(grid.loc[i])
             hwes_scored = HWES(y_train,dates=dates,initialization_method='estimated',**params).fit(optimized=True,use_brute=True)
             yhat = hwes_scored.fittedvalues
             p = pd.read_html(hwes_scored.summary().tables[1].as_html(), header=0)[0].shape[0] # how many predictors were added to the model
-            score = ic(y_train,yhat,p)
-            scores.append(score)
+            scores.append(ic(y_train,yhat,p))
 
-        best_mod_index = [i for i, v in enumerate(scores) if v == min(scores)][0] # in case there's a tie, take first element
+        best_mod_index = [i for i, v in enumerate(scores) if v == min(scores)][0] # in case there's a tie (unlikely), take first element
         best_params = dict(grid.loc[best_mod_index])
 
         hwes_train = HWES(y_train,dates=dates,initialization_method='estimated',**best_params).fit(optimized=True,use_brute=True)
