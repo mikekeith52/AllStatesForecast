@@ -21,6 +21,7 @@ class Forecaster:
             ets (R forecast pkg: ets)
             gradient boosted trees (sklearn)
             holt-winters exponential smoothing (statsmodels)
+            holt-winters exponential smoothing (statsmodels, automated)
             lasso (sklearn)
             multi level perceptron (sklearn)
             multi linear regression (sklearn)
@@ -243,8 +244,8 @@ class Forecaster:
             for more complex processing, perform manipulations before passing through this function
             stores results in self.current_xreg, self.future_xreg, self.future_dates, and self.forecast_out_periods
             Parameters: xreg_df : pandas dataframe
-            				this should include only independent regressors either in numeric form or that can be dummied into a 1/0 variable as well as a date column that can be parsed by pandas
-            				do not include the dependent variable value
+                            this should include only independent regressors either in numeric form or that can be dummied into a 1/0 variable as well as a date column that can be parsed by pandas
+                            do not include the dependent variable value
                         date_col : str, requried
                             the name of the date column in xreg_df that can be parsed with the pandas.to_datetime() function, if available
                             if no date column available, pass None -- assumes none of the columns are dates and that all dataframe obs start at the same time as self.y
@@ -323,8 +324,8 @@ class Forecaster:
         """
         self.name = str(self.name) if not isinstance(self.name,str) else self.name
         self.y = list(self.y) if not isinstance(self.y,list) else self.y
-        self.current_dates = list(self.current_dates) if not isinstance(self.current_dates,list) else self.current_dates
-        self.future_dates = list(self.future_dates) if not isinstance(self.future_dates,list) else self.future_dates
+        self.current_dates = pd.to_datetime(self.current_dates).to_list()
+        self.future_dates = pd.to_datetime(self.future_dates).to_list()
         self.forecast_out_periods = int(self.forecast_out_periods)
         if check_xreg:
             assert isinstance(self.current_xreg,dict), f'current_xreg must be dict type, not {type(self.current_xreg)}'
@@ -754,13 +755,14 @@ class Forecaster:
             https://www.statsmodels.org/stable/generated/statsmodels.tsa.holtwinters.ExponentialSmoothing.html
             https://towardsdatascience.com/holt-winters-exponential-smoothing-d703072c0572
             The Holt-Winters ES modifies the Holt ES technique so that it can be used in the presence of both trend and seasonality.
+            for a more automated holt-winters application, see forecast_auto_hwes()
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
                         call_me : str, default "hwes"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-            keywords are passed to the HWES function from statsmodels -- `dates` is specified automatically
-            some important parameters to specify as key words: trend, damped_trend, seasonal, seasonal_periods, use_boxcox
+                        keywords are passed to the ExponentialSmoothing function from statsmodels -- `dates` is specified automatically
+                        some important parameters to specify as key words: trend, damped_trend, seasonal, seasonal_periods, use_boxcox
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from statsmodels.tsa.holtwinters import ExponentialSmoothing as HWES
@@ -784,6 +786,85 @@ class Forecaster:
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
 
         hwes = HWES(y,dates=dates,**kwargs).fit(optimized=True,use_brute=True)
+        self.forecasts[call_me] = list(hwes.predict(start=len(y),end=len(y) + self.forecast_out_periods-1))
+        self._sm_summary_to_fi(hwes,call_me)
+
+    def forecast_auto_hwes(self,test_length=1,seasonal=False,seasonal_periods=None,call_me='auto_hwes'):
+        """ Holt-Winters Exponential Smoothing
+            https://www.statsmodels.org/stable/generated/statsmodels.tsa.holtwinters.ExponentialSmoothing.html
+            https://towardsdatascience.com/holt-winters-exponential-smoothing-d703072c0572
+            The Holt-Winters ES modifies the Holt ES technique so that it can be used in the presence of both trend and seasonality.
+            Will add different trend and seasonal components automatically and test which minimizes AIC of in-sample predictions
+            uses optimized model parameters to fit final model
+            for a more manual holt-winters application, see forecast_hwes()
+            Parameters: test_length : int, default 1
+                            the number of periods to holdout in order to test the model
+                            must be at least 1 (AssertionError raised if not)
+                        seasonal : bool, default False
+                            whether there is seasonality in the series
+                        seasonal_periods : int, default None
+                            the number of periods to complete one seasonal period (for monthly, this is 12)
+                            ignored if seasonal is False
+                        call_me : str, default "hwes"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        keywords are passed to the ExponentialSmoothing function from statsmodels -- `dates` is specified automatically
+                        some important parameters to specify as key words: trend, damped_trend, seasonal, seasonal_periods, use_boxcox
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
+        """
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing as HWES
+        from RegscorePy.aic import aic as ic
+        from itertools import product
+        expand_grid = lambda d: pd.DataFrame([row for row in product(*d.values())],columns=d.keys())
+
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        if seasonal:
+            assert isinstance(seasonal_periods,int),'seasonal_periods must be int type when seasonal is True'
+            assert seasonal_periods > 0,'seasonal_periods must be greater than 1 when seasonal is True'
+        elif not seasonal:
+            seasonal_periods = None
+        else:
+            raise ValueError(f'argument passed to seasonal not recognized: {seasonal}')
+
+        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+
+        y = pd.Series(self.y)
+        y_train = y.values[:-test_length]
+        y_test = y.values[-test_length:]
+        dates = pd.to_datetime(self.current_dates) if not self.current_dates is None else None
+
+        scores = [] # lower is better
+        grid = expand_grid({
+            'trend':[None,'add','mul'],
+            'seasonal':[None] if not seasonal else ['add','mul'],
+            'damped_trend':[True,False],
+            'use_boxcox':[True,False,1/2.718281828], # the last one is euler's number -- meant to approximate a natural log transformation
+            'seasonal_periods':[None] if not seasonal_periods else [seasonal_periods]
+        })
+
+        grid = grid.loc[(~grid['trend'].isnull()) & (grid['damped_trend'] == False)].reset_index(drop=True)
+
+        for i, v in grid.iterrows():
+            params = dict(grid.loc[i])
+            hwes_scored = HWES(y_train,dates=dates,initialization_method='estimated',**params).fit(optimized=True,use_brute=True)
+            yhat = hwes_scored.fittedvalues
+            p = pd.read_html(hwes_scored.summary().tables[1].as_html(), header=0)[0].shape[0] # how many predictors were added to the model
+            score = ic(y_train,yhat,p)
+            scores.append(score)
+
+        best_mod_index = [i for i, v in enumerate(scores) if v == min(scores)][0] # in case there's a tie, take first element
+        best_params = dict(grid.loc[best_mod_index])
+
+        hwes_train = HWES(y_train,dates=dates,initialization_method='estimated',**best_params).fit(optimized=True,use_brute=True)
+        pred = list(hwes_train.predict(start=len(y_train),end=len(y)-1))
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['model_form'] = 'Holt-Winters Exponential Smoothing {}'.format(best_params)
+        self.info[call_me]['test_set_actuals'] = list(y_test)
+        self.info[call_me]['test_set_predictions'] = pred
+        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
+        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+
+        hwes = HWES(y,dates=dates,initialization_method='estimated',**best_params).fit(optimized=True,use_brute=True)
         self.forecasts[call_me] = list(hwes.predict(start=len(y),end=len(y) + self.forecast_out_periods-1))
         self._sm_summary_to_fi(hwes,call_me)
 
