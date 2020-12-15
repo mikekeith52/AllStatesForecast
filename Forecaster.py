@@ -810,7 +810,6 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from statsmodels.tsa.holtwinters import ExponentialSmoothing as HWES
-        from RegscorePy.aic import aic as ic
         from itertools import product
         expand_grid = lambda d: pd.DataFrame([row for row in product(*d.values())],columns=d.keys())
 
@@ -832,25 +831,32 @@ class Forecaster:
         dates = pd.to_datetime(self.current_dates) if not self.current_dates is None else None
 
         scores = [] # lower is better
-        grid = expand_grid({
-            'trend':[None,'add','mul'],
-            'seasonal':[None] if not seasonal else ['add','mul'],
-            'damped_trend':[True,False],
-            'use_boxcox':[True,False,0],
-            'seasonal_periods':[None] if not seasonal_periods else [seasonal_periods]
-        })
+        if min(self.y) > 0:
+            grid = expand_grid({
+                'trend':[None,'add','mul'],
+                'seasonal':[None] if not seasonal else ['add','mul'],
+                'damped_trend':[True,False],
+                'use_boxcox':[True,False,0], # the last one is a log transformation
+                'seasonal_periods':[None] if not seasonal else [seasonal_periods]
+            })
+        else:
+            grid = expand_grid({
+                'trend':[None,'add'],
+                'seasonal':[None] if not seasonal else ['add'],
+                'damped_trend':[True,False],
+                'use_boxcox':[None], # the last one is a log transformation
+                'seasonal_periods':[None] if not seasonal else [seasonal_periods]
+            })
 
         grid = grid.loc[((grid['trend'].isnull()) & (grid['damped_trend'] == False)) | (~grid['trend'].isnull())].reset_index(drop=True) # it does not know how to damp when there is no trend
 
         for i, v in grid.iterrows():
             params = dict(grid.loc[i])
             hwes_scored = HWES(y_train,dates=dates,initialization_method='estimated',**params).fit(optimized=True,use_brute=True)
-            yhat = hwes_scored.fittedvalues
-            p = pd.read_html(hwes_scored.summary().tables[1].as_html(), header=0)[0].shape[0] # how many predictors were added to the model
-            scores.append(ic(y_train,yhat,p))
+            scores.append(hwes_scored.aic)
 
-        best_mod_index = [i for i, v in enumerate(scores) if v == min(scores)][0] # in case there's a tie (unlikely), take first element
-        best_params = dict(grid.loc[best_mod_index])
+        grid['aic'] = scores
+        best_params = dict(grid.dropna(subset=['aic']).loc[grid['aic'] == grid['aic'].min()].drop(columns='aic').iloc[0])
 
         hwes_train = HWES(y_train,dates=dates,initialization_method='estimated',**best_params).fit(optimized=True,use_brute=True)
         pred = list(hwes_train.predict(start=len(y_train),end=len(y)-1))
@@ -869,6 +875,7 @@ class Forecaster:
         """ Exponential Smoothing State Space Model With Box-Cox Transformation, ARMA Errors, Trend And Seasonal Component
             forecasts using tbats from the forecast package in R
             auto-regressive only (no external regressors)
+            this is an automated model selection
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -928,6 +935,7 @@ class Forecaster:
         """ Exponential Smoothing State Space Model
             forecasts using ets from the forecast package in R
             auto-regressive only (no external regressors)
+            this is an automated model selection
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
