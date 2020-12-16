@@ -555,7 +555,7 @@ class Forecaster:
         else:
             self.feature_importance.pop(call_me)
 
-    def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',X13_PATH='auto',error='raise'):
+    def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',error='raise'):
         """ Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/
             Forecasts using the seas function from the seasonal package, also need the X13 software (x13as.exe) saved locally
             Automatically takes the best model ARIMA model form that fulfills a certain set of criteria (low forecast error rate, high statistical significance, etc)
@@ -586,10 +586,6 @@ class Forecaster:
                             x13 already has an extensive list of x regressors that it will pull automatically--read the documentation for more info
                         call_me : str, default "sarimax13"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-                        X13_PATH : str, default "auto"
-                            the local location of the x13as.exe executable
-                            if "auto", assumes it is saved in {local_directory}/x13asall_V1.1_B39/x13as
-                            be sure to use front slashes (/) and not backslashes (\\) to keep R happy
                         error: one of {"raise","pass","print"}, default "raise"
                             if unable to estimate the model, "raise" will raise an error
                             if unable to estimate the model, "pass" will silently skip the model and delete all associated attribute keys (self.info)
@@ -600,10 +596,7 @@ class Forecaster:
         if start == 'auto':
             try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
             except: raise ValueError('could not set start automatically, try passing argument manually')
-        if X13_PATH == 'auto':
-            X13_PATH = f'{rwd}/x13asall_V1.1_B39/x13as'
 
-        assert os.path.exists(X13_PATH + '/x13as.exe'), 'x13as.exe not found. did you specify X13_PATH?'
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
@@ -611,7 +604,6 @@ class Forecaster:
 
         ro.r(f"""
             rm(list=ls())
-            Sys.setenv(X13_PATH = '{X13_PATH}')
             setwd('{rwd}')
             start_p <- c{start}
             interval <- {interval}
@@ -623,7 +615,7 @@ class Forecaster:
             y_train <- subset(y,start=1,end=nrow(data)-test_length)
             y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
             
-            """)
+        """)
 
         ro.r("""
             if (ncol(data) > 1){
@@ -645,21 +637,38 @@ class Forecaster:
         """)
 
         try:
-            ro.r(f"""
-                    m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
-                    p <- series(m_test, "forecast.forecasts")[1:test_length,]
-                    m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
-                    f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
-                    arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
-                    write <- data.frame(actual=y_test,forecast=p[,1])
-                    write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
-                    write$model_form <- arima_form
-                    write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
-                    arima_form <- paste('ARIMA-X13',m$model$arima$model)
-                    write <- data.frame(forecast=f[,1])
-                    write$model_form <- arima_form
-                    write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
-            """)
+            if min(self.y) > 0:
+                ro.r(f"""
+                        m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
+                        p <- series(m_test, "forecast.forecasts")[1:test_length,]
+                        m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
+                        f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
+                        arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
+                        write <- data.frame(actual=y_test,forecast=p[,1])
+                        write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
+                        write$model_form <- arima_form
+                        write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+                        arima_form <- paste('ARIMA-X13',m$model$arima$model)
+                        write <- data.frame(forecast=f[,1])
+                        write$model_form <- arima_form
+                        write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+                """)
+            else: # no automatic model selection when 0 in the predicted variable
+                ro.r(f"""
+                        m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",arima.model = "(1 1 1)(0 1 1)")
+                        p <- series(m_test, "forecast.forecasts")[1:test_length,]
+                        m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
+                        f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
+                        arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
+                        write <- data.frame(actual=y_test,forecast=p[,1])
+                        write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
+                        write$model_form <- arima_form
+                        write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+                        arima_form <- paste('ARIMA-X13',m$model$arima$model)
+                        write <- data.frame(forecast=f[,1])
+                        write$model_form <- arima_form
+                        write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+                """)
         except Exception as e:
             self.info.pop(call_me)
             if error == 'raise':
@@ -851,7 +860,7 @@ class Forecaster:
         grid = grid.loc[((grid['trend'].isnull()) & (grid['damped_trend'] == False)) | (~grid['trend'].isnull())].reset_index(drop=True) # it does not know how to damp when there is no trend
 
         for i, v in grid.iterrows():
-            params = dict(grid.loc[i])
+            params = dict(v)
             hwes_scored = HWES(y_train,dates=dates,initialization_method='estimated',**params).fit(optimized=True,use_brute=True)
             scores.append(hwes_scored.aic)
 
