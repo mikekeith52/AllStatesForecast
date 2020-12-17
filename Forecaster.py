@@ -637,49 +637,31 @@ class Forecaster:
         """)
 
         try:
-            if min(self.y) > 0:
-                ro.r(f"""
-                        m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
-                        p <- series(m_test, "forecast.forecasts")[1:test_length,]
-                        m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
-                        f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
-                        arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
-                        write <- data.frame(actual=y_test,forecast=p[,1])
-                        write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
-                        write$model_form <- arima_form
-                        write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
-                        arima_form <- paste('ARIMA-X13',m$model$arima$model)
-                        write <- data.frame(forecast=f[,1])
-                        write$model_form <- arima_form
-                        write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
-                """)
-            else: # no automatic model selection when 0 in the predicted variable
-                ro.r(f"""
-                        m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",arima.model = "(1 1 1)(0 1 1)")
-                        p <- series(m_test, "forecast.forecasts")[1:test_length,]
-                        m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
-                        f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
-                        arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
-                        write <- data.frame(actual=y_test,forecast=p[,1])
-                        write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
-                        write$model_form <- arima_form
-                        write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
-                        arima_form <- paste('ARIMA-X13',m$model$arima$model)
-                        write <- data.frame(forecast=f[,1])
-                        write$model_form <- arima_form
-                        write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
-                """)
+            ro.r(f"""
+                    m_test <- seas(x=y_train,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
+                    p <- series(m_test, "forecast.forecasts")[1:test_length,]
+                    m <- seas(x=y,xreg=all_externals_ts,forecast.save="forecasts",pickmdl.method="best")
+                    f <- series(m, "forecast.forecasts")[1:{self.forecast_out_periods},]
+                    arima_form <- paste('ARIMA-X13',m_test$model$arima$model)
+                    write <- data.frame(actual=y_test,forecast=p[,1])
+                    write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
+                    write$model_form <- arima_form
+                    write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+                    arima_form <- paste('ARIMA-X13',m$model$arima$model)
+                    write <- data.frame(forecast=f[,1])
+                    write$model_form <- arima_form
+                    write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+            """)
         except Exception as e:
             self.info.pop(call_me)
             if error == 'raise':
                 raise e
-            else:
-                if error == 'print':
-                    print(f"skipping model, here's the error:\n{e}")
-                elif error != 'pass':
-                    print(f'error argument not recognized: {error}')
-                    raise e
-                return None
+            elif error == 'print':
+                print(f"skipping model, here's the error:\n{e}")
+            elif error != 'pass':
+                print(f'error argument not recognized: {error}')
+                raise e
+            return None
 
         ro.r("""
             # feature_importance -- cool output
@@ -848,7 +830,7 @@ class Forecaster:
                 'use_boxcox':[True,False,0], # the last one is a log transformation
                 'seasonal_periods':[None] if not seasonal else [seasonal_periods]
             })
-        else:
+        else: # multiplicative trends only work for series of all positive figures
             grid = expand_grid({
                 'trend':[None,'add'],
                 'seasonal':[None] if not seasonal else ['add'],
@@ -857,20 +839,19 @@ class Forecaster:
                 'seasonal_periods':[None] if not seasonal else [seasonal_periods]
             })
 
-        grid = grid.loc[((grid['trend'].isnull()) & (grid['damped_trend'] == False)) | (~grid['trend'].isnull())].reset_index(drop=True) # it does not know how to damp when there is no trend
+        grid = grid.loc[((grid['trend'].isnull()) & (~grid['damped_trend'])) | (~grid['trend'].isnull())].reset_index(drop=True) # it does not know how to damp when there is no trend
 
-        for i, v in grid.iterrows():
-            params = dict(v)
+        for i, params in grid.iterrows():
             hwes_scored = HWES(y_train,dates=dates,initialization_method='estimated',**params).fit(optimized=True,use_brute=True)
             scores.append(hwes_scored.aic)
 
         grid['aic'] = scores
-        best_params = dict(grid.dropna(subset=['aic']).loc[grid['aic'] == grid['aic'].min()].drop(columns='aic').iloc[0])
+        best_params = grid.dropna(subset=['aic']).loc[grid['aic'] == grid['aic'].min()].drop(columns='aic').iloc[0]
 
         hwes_train = HWES(y_train,dates=dates,initialization_method='estimated',**best_params).fit(optimized=True,use_brute=True)
         pred = list(hwes_train.predict(start=len(y_train),end=len(y)-1))
         self.info[call_me]['holdout_periods'] = test_length
-        self.info[call_me]['model_form'] = 'Holt-Winters Exponential Smoothing {}'.format(best_params)
+        self.info[call_me]['model_form'] = 'Holt-Winters Exponential Smoothing {}'.format(dict(best_params))
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
         self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
