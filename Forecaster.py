@@ -42,6 +42,7 @@ class Forecaster:
                         'test_set_actuals' : list - the actual figures from the test set
                         'test_set_predictions' : list - the predicted figures from the test set evaluated with a model of the training set
                         'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
+                        'fitted_values' : list - the model's fitted values, when available. if not available, None
                 in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
                 in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
                 in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features' prediction power
@@ -111,6 +112,7 @@ class Forecaster:
             new_data = new_data[Xvars]
         f = regr.predict(new_data)
         self.forecasts[call_me] = list(f)
+        self.info[call_me]['fitted_values'] = list(regr.predict(X))
 
     def _set_remaining_info(self,call_me,test_length,model_form):
         """ sets the holdout_periods and model_form values in the self.info nested dictionary, where call_me (model nickname) is the key
@@ -211,6 +213,9 @@ class Forecaster:
         results_summary = sm_model.summary()
         results_as_html = results_summary.tables[1].as_html()
         self.feature_importance[call_me] = pd.read_html(results_as_html, header=0, index_col=0)[0]
+
+    def _get_info_dict(self):
+        return dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape','fitted_values'])
 
     def get_data_fred(self,series,date_start='1900-01-01'):
         """ imports data from FRED into a pandas dataframe
@@ -479,7 +484,7 @@ class Forecaster:
         """
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=Xvars)
         ro.r(f"""
             rm(list=ls())
@@ -529,6 +534,9 @@ class Forecaster:
             write <- data.frame(forecast=p)
             write$model_form <- arima_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+
+            write <- data.frame(fitted = fitted(ar))
+            write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
         """)
         
         ro.r("""
@@ -540,14 +548,17 @@ class Forecaster:
 
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+        tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
+
         self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = list(tmp_forecast['forecast'])
         
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
-        self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
-        self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
-        self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+        self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
+        self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
+        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
         if self.feature_importance[call_me].shape[0] > 0: # for the (0,i,0) model case
@@ -599,7 +610,7 @@ class Forecaster:
 
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         self._prepr('forecast','seasonal',test_length=test_length,call_me=call_me,Xvars=Xvars)
 
         ro.r(f"""
@@ -706,7 +717,7 @@ class Forecaster:
 
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         if not Xvars is None:
             if Xvars == 'all':
                 X = pd.DataFrame(self.current_xreg)
@@ -735,9 +746,11 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
         self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
+
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
 
         arima = ARIMA(y,exog=X,order=order,seasonal_order=seasonal_order,trend=trend,dates=dates,**kwargs).fit()
+        self.info[call_me]['fitted_values'] = list(arima.fittedvalues)
         self.forecasts[call_me] = list(arima.predict(exog=X_f,start=len(y),end=len(y) + self.forecast_out_periods-1,typ='levels'))
         self._sm_summary_to_fi(arima,call_me)
 
@@ -760,7 +773,7 @@ class Forecaster:
 
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
 
         y = pd.Series(self.y)
         y_train = y.values[:-test_length]
@@ -777,6 +790,7 @@ class Forecaster:
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
 
         hwes = HWES(y,dates=dates,**kwargs).fit(optimized=True,use_brute=True)
+        self.info[call_me]['fitted_values'] = list(hwes.fittedvalues)
         self.forecasts[call_me] = list(hwes.predict(start=len(y),end=len(y) + self.forecast_out_periods-1))
         self._sm_summary_to_fi(hwes,call_me)
 
@@ -814,7 +828,7 @@ class Forecaster:
         else:
             raise ValueError(f'argument passed to seasonal not recognized: {seasonal}')
 
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
 
         y = pd.Series(self.y)
         y_train = y.values[:-test_length]
@@ -855,6 +869,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
         self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
+        self.info[call_me]['fitted_values'] = list(hwes.fittedvalues)
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
 
         hwes = HWES(y,dates=dates,initialization_method='estimated',**best_params).fit(optimized=True,use_brute=True)
@@ -879,7 +894,7 @@ class Forecaster:
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
 
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=None)
         ro.r(f"""
             rm(list=ls())
@@ -909,9 +924,14 @@ class Forecaster:
             write <- data.frame(forecast=p)
             write$model_form <- tbats_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+
+            write <- data.frame(fitted = fitted(ar))
+            write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
         """)
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+        tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
+
         self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = list(tmp_forecast['forecast'])
         
@@ -920,6 +940,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+        self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
 
     def forecast_ets(self,test_length=1,call_me='ets'):
         """ Exponential Smoothing State Space Model
@@ -936,7 +957,7 @@ class Forecaster:
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
 
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=None)
         ro.r(f"""
             rm(list=ls())
@@ -966,9 +987,14 @@ class Forecaster:
             write <- data.frame(forecast=p)
             write$model_form <- ets_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+
+            write <- data.frame(fitted = fitted(ar))
+            write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
         """)
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+        tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
+
         self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = list(tmp_forecast['forecast'])
         
@@ -977,6 +1003,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
         self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
         self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+        self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
 
     def forecast_var(self,*series,auto_resize=False,test_length=1,Xvars=None,lag_ic='AIC',optimizer='AIC',season='NULL',max_externals=None,call_me='var'):
         """ Vector Auto Regression
@@ -1053,7 +1080,7 @@ class Forecaster:
 
         self._prepr('vars',test_length=test_length,call_me=call_me,Xvars=Xvars)
         series_df.to_csv('tmp/tmp_r_cid.csv',index=False)
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
 
         ro.r(f"""
                 rm(list=ls())
@@ -1268,7 +1295,7 @@ class Forecaster:
 
         self._prepr('tsDyn',test_length=test_length,call_me=call_me,Xvars=Xvars)
         cid_df.to_csv('tmp/tmp_r_cid.csv',index=False)
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
 
         ro.r(f"""
                 rm(list=ls())
@@ -1426,7 +1453,7 @@ class Forecaster:
         from sklearn.ensemble import RandomForestRegressor
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = RandomForestRegressor(**hyper_params,random_state=20)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
@@ -1455,7 +1482,7 @@ class Forecaster:
         from sklearn.ensemble import GradientBoostingRegressor
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = GradientBoostingRegressor(**hyper_params,random_state=20)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
@@ -1484,7 +1511,7 @@ class Forecaster:
         from sklearn.ensemble import AdaBoostRegressor
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = AdaBoostRegressor(**hyper_params,random_state=20)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
@@ -1513,7 +1540,7 @@ class Forecaster:
         from sklearn.neural_network import MLPRegressor
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = MLPRegressor(**hyper_params,random_state=20)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
@@ -1539,7 +1566,7 @@ class Forecaster:
         from sklearn.linear_model import LinearRegression
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = LinearRegression()
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
@@ -1568,7 +1595,7 @@ class Forecaster:
         from sklearn.linear_model import Ridge
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = Ridge(alpha=alpha)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
@@ -1597,7 +1624,7 @@ class Forecaster:
         from sklearn.linear_model import Lasso
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = Lasso(alpha=alpha)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
@@ -1626,7 +1653,7 @@ class Forecaster:
         from sklearn.svm import SVR
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
-        self.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+        self.info[call_me] = self._get_info_dict()
         X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
         regr = SVR(**hyper_params)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
@@ -1736,7 +1763,7 @@ class Forecaster:
         x = [h[0] for h in Counter(self.mape).most_common()]
         return x[::-1] # reversed copy of the list
 
-    def display_ts_plot(self,models='all',print_model_form=False,print_mapes=False):
+    def display_ts_plot(self,models='all',plot_fitted=False,print_model_form=False,print_mapes=False):
         """ Plots time series results of the stored forecasts
             All models plotted in order of best-to-worst mapes
             Parameters: models : list, "all", or starts with "top_"; default "all"
@@ -1744,6 +1771,10 @@ class Forecaster:
                             if "all" plots all models
                             if list type, plots all models in the list
                             if starts with "top_" reads the next character(s) as the top however models you want plotted (based on lowest MAPE values)
+                        plot_fitted : bool, default False
+                            whether you want each model's fitted values plotted on the graph as a light dashed line
+                            only works when graphing one model at a time
+                            this may not be available for some models
                         print_model_form : bool, default False
                             whether to print the model form to the console of the models being plotted
                         print_mapes : bool, default False
@@ -1777,13 +1808,18 @@ class Forecaster:
                 print(print_text)
 
         # plots with dates if dates are available, else plots with ambiguous integers
-        sns.lineplot(x=pd.to_datetime(self.current_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.y)),y=self.y,ci=None)
+        sns.lineplot(x=pd.to_datetime(self.current_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.y)),
+            y=self.y,ci=None)
         labels = ['Actual']
 
         for m in plot_these_models:
             # plots with dates if dates are available, else plots with ambiguous integers
             sns.lineplot(x=pd.to_datetime(self.future_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.forecasts[m])),y=self.forecasts[m])
-            labels.append(m)
+            labels.append(f'{m} forecast')
+            if plot_fitted & (not self.info[m]['fitted_values'] is None) & (len(plot_these_models) == 1):
+                sns.lineplot(x=pd.to_datetime(self.current_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.y)),
+                    y=self.info[m]['fitted_values'],style=True,dashes=[(2,2)],hue=.5)
+                labels.append(f'{m} fitted values')
 
         plt.legend(labels=labels,loc='best')
         plt.xlabel('Date')
