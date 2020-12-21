@@ -869,10 +869,10 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
         self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
-        self.info[call_me]['fitted_values'] = list(hwes.fittedvalues)
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
 
         hwes = HWES(y,dates=dates,initialization_method='estimated',**best_params).fit(optimized=True,use_brute=True)
+        self.info[call_me]['fitted_values'] = list(hwes.fittedvalues)
         self.forecasts[call_me] = list(hwes.predict(start=len(y),end=len(y) + self.forecast_out_periods-1))
         self._sm_summary_to_fi(hwes,call_me)
 
@@ -1773,7 +1773,7 @@ class Forecaster:
                             if starts with "top_" reads the next character(s) as the top however models you want plotted (based on lowest MAPE values)
                         plot_fitted : bool, default False
                             whether you want each model's fitted values plotted on the graph as a light dashed line
-                            only works when graphing one model at a time
+                            only works when graphing one model at a time (ignored otherwise)
                             this may not be available for some models
                         print_model_form : bool, default False
                             whether to print the model form to the console of the models being plotted
