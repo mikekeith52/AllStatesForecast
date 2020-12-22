@@ -1718,7 +1718,7 @@ class Forecaster:
         self.forecasts[call_me] = [None]*self.forecast_out_periods
 
         self.info[call_me] = self._get_info_dict()
-        self.info[call_me]['holdout_periods'] = test_length,
+        self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['test_set_actuals'] = self.y[-(test_length):]
 
         forecasts = pd.DataFrame()
