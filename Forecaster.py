@@ -1717,11 +1717,9 @@ class Forecaster:
         self.mape[call_me] = 1
         self.forecasts[call_me] = [None]*self.forecast_out_periods
 
-        self.info[call_me] = {'holdout_periods':test_length,
-                             'model_form':None,
-                             'test_set_actuals':self.y[-(test_length):],
-                             'test_set_predictions':[None],
-                             'test_set_ape':[None]}
+        self.info[call_me] = self._get_info_dict()
+        self.info[call_me]['holdout_periods'] = test_length,
+        self.info[call_me]['test_set_actuals'] = self.y[-(test_length):]
 
         forecasts = pd.DataFrame()
         test_set_predictions_df = pd.DataFrame()
@@ -1743,12 +1741,15 @@ class Forecaster:
                             what to call the evaluated model -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         mape : float, default 1.0
                             the MAPE to assign to the model -- since the model is not tested, this should be some arbitrarily high number
-                            if a numeric type is not passed, a value error is raised
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         self.mape[call_me] = float(mape)
+        self.info[call_me] = self._get_info_dict()
         self.forecasts[call_me] = [self.y[-1]]*self.forecast_out_periods
-        self.info[call_me] = {'holdout_periods':None,'model_form':'Naive','test_set_actuals':[None],'test_set_predictions':[None],'test_set_ape':[None]}
+        self.info[call_me]['model_form'] = 'Naive'
+        self.info[call_me]['test_set_actuals'] = [None]
+        self.info[call_me]['test_set_predictions'] = [None]
+        self.info[call_me]['test_set_ape'] = [None]
 
     def set_best_model(self):
         """ sets the best forecast model based on which model has the lowest MAPE value for the given holdout periods
