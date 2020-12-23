@@ -235,7 +235,7 @@ class Forecaster:
         """
         self.name = series
         df = pdr.get_data_fred(series,start=date_start)
-        self.y = list(df[series])
+        self.y = df[series].to_list()
         self.current_dates = df.index.to_list()
 
     def process_xreg_df(self,xreg_df,date_col,process_columns=False):
@@ -291,7 +291,7 @@ class Forecaster:
 
         if not date_col is None:
             xreg_df[date_col] = pd.to_datetime(xreg_df[date_col])
-            self.future_dates = list(xreg_df.loc[xreg_df[date_col] > self.current_dates[-1],date_col])
+            self.future_dates = xreg_df.loc[xreg_df[date_col] > self.current_dates[-1],date_col].to_list()
             xreg_df = xreg_df.loc[xreg_df[date_col] >= self.current_dates[0]]
         xreg_df = pd.get_dummies(xreg_df,drop_first=True)
 
@@ -684,13 +684,13 @@ class Forecaster:
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
         self.mape[call_me] = tmp_test_results['APE'].mean()
-        self.forecasts[call_me] = list(tmp_forecast['forecast'])
-        
+        self.forecasts[call_me] = tmp_forecast['forecast'].to_list()
+    
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
-        self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
-        self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
-        self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+        self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
+        self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
+        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
     def forecast_arima(self,test_length=1,Xvars=None,order=(0,0,0),seasonal_order=(0,0,0,0),trend=None,call_me='arima',**kwargs):
@@ -933,13 +933,13 @@ class Forecaster:
         tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
 
         self.mape[call_me] = tmp_test_results['APE'].mean()
-        self.forecasts[call_me] = list(tmp_forecast['forecast'])
+        self.forecasts[call_me] = tmp_forecast['forecast'].to_list()
         
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
-        self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
-        self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
-        self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+        self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
+        self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
+        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
 
     def forecast_ets(self,test_length=1,call_me='ets'):
@@ -996,13 +996,13 @@ class Forecaster:
         tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
 
         self.mape[call_me] = tmp_test_results['APE'].mean()
-        self.forecasts[call_me] = list(tmp_forecast['forecast'])
+        self.forecasts[call_me] = tmp_forecast['forecast'].to_list()
         
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
-        self.info[call_me]['test_set_actuals'] = list(tmp_test_results['actual'])
-        self.info[call_me]['test_set_predictions'] = list(tmp_test_results['forecast'])
-        self.info[call_me]['test_set_ape'] = list(tmp_test_results['APE'])
+        self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
+        self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
+        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
 
     def forecast_var(self,*series,auto_resize=False,test_length=1,Xvars=None,lag_ic='AIC',optimizer='AIC',season='NULL',max_externals=None,call_me='var'):
@@ -1208,12 +1208,12 @@ class Forecaster:
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
 
         self.info[call_me]['holdout_periods'] = test_length
-        self.info[call_me]['test_set_predictions'] = list(tmp_test_results.iloc[:,0])
+        self.info[call_me]['test_set_predictions'] = tmp_test_results.iloc[:,0].to_list()
         self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
         self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
-        self.forecasts[call_me] = list(tmp_forecast.iloc[:,0])
+        self.forecasts[call_me] = tmp_forecast.iloc[:,0].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
     def forecast_vecm(self,*cids,auto_resize=False,test_length=1,Xvars=None,r=1,max_lags=6,optimizer='AIC',max_externals=None,call_me='vecm'):
@@ -1424,12 +1424,12 @@ class Forecaster:
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
 
         self.info[call_me]['holdout_periods'] = test_length
-        self.info[call_me]['test_set_predictions'] = list(tmp_test_results.iloc[:,0])
+        self.info[call_me]['test_set_predictions'] = tmp_test_results.iloc[:,0].to_list()
         self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
         self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
-        self.forecasts[call_me] = list(tmp_forecast.iloc[:,0])
+        self.forecasts[call_me] = tmp_forecast.iloc[:,0].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
     def forecast_rf(self,test_length=1,Xvars='all',call_me='rf',hyper_params={},set_feature_importance=True):
@@ -1809,8 +1809,7 @@ class Forecaster:
                 print(print_text)
 
         # plots with dates if dates are available, else plots with ambiguous integers
-        sns.lineplot(x=pd.to_datetime(self.current_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.y)),
-            y=self.y,ci=None)
+        sns.lineplot(x=pd.to_datetime(self.current_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.y)),y=self.y)
         labels = ['Actual']
 
         for m in plot_these_models:
