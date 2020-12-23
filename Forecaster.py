@@ -291,7 +291,7 @@ class Forecaster:
 
         if not date_col is None:
             xreg_df[date_col] = pd.to_datetime(xreg_df[date_col])
-            self.future_dates = xreg_df.loc[xreg_df[date_col] > self.current_dates[-1],date_col].to_list()
+            self.future_dates = xreg_df.loc[xreg_df[date_col] > list(self.current_dates)[-1],date_col].to_list()
             xreg_df = xreg_df.loc[xreg_df[date_col] >= self.current_dates[0]]
         xreg_df = pd.get_dummies(xreg_df,drop_first=True)
 
@@ -309,7 +309,7 @@ class Forecaster:
 
         if not date_col is None:
             current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
-            future_xreg_df = xreg_df.loc[xreg_df[date_col] > self.current_dates[-1]].drop(columns=date_col)        
+            future_xreg_df = xreg_df.loc[xreg_df[date_col] > list(self.current_dates)[-1]].drop(columns=date_col)        
         else:
             current_xreg_df = xreg_df.iloc[:len(self.y)]
             future_xreg_df = xreg_df.iloc[len(self.y):]
@@ -1826,4 +1826,43 @@ class Forecaster:
         plt.ylabel('{}'.format(self.name if not self.name is None else ''))
         plt.title(f'{self.name} Forecast Results')
         plt.show()
+
+    def export_to_df(self,which='top_1',save_csv=False,csv_name='forecast_results.csv'):
+        """ exports a forecast or forecasts to a pandas dataframe with future dates as the index and each exported forecast as a column
+            will fail if you attempt to export forecasts of varying lengths
+            Parameters: which : starts with "top_", "all", or list; default "best"
+                            which forecasts to export
+                            if a list, should be a list of model nicknames
+                        save_csv : bool, default False
+                            whether to save the dataframe to a csv file in the current directory
+                        csv_name : str, default "forecat_results.csv"
+                            the name of the csv file to be written out
+                            ignored if save_csv is False
+                            default pd.to_csv() called (comma delimited)
+                            you can use this to change where the file is saved by specifying the file path
+                                ex: csv_name = 'C:/NotWorkingDirectory/forecast_results.csv'
+                                    csv_name = '../OtherParentDirectory/forecast_results.csv'
+        """
+        df = pd.DataFrame(index=self.future_dates if not self.future_dates is None else range(self.forecast_out_periods))
+        if isinstance(which,str):
+            if (which == 'all') | (which.startswith('top_') & (int(which.split('_')[1]) > len(self.forecasts.keys()))):
+                for m in self.order_all_forecasts_best_to_worst()[:]:
+                    df[m] = self.forecasts[m]
+            elif which.startswith('top_'):
+                top = int(which.split('_')[1])
+                for m in self.order_all_forecasts_best_to_worst()[:top]:
+                    df[m] = self.forecasts[m]
+            else:
+                raise ValueError(f'which argument not supported: {which}')
+        elif isinstance(which,list):
+            for m in which[:]:
+                df[m] = self.forecasts[m]
+        else:
+            raise ValueError(f'which argument not supported: {which}')
+
+        if save_csv:
+            df.to_csv(csv_name)
+
+        return df
+
 
