@@ -461,8 +461,8 @@ class Forecaster:
                             "top" is determined through absolute value of the pearson correlation coefficient on the training set
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
                             if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation
-                            because the auto.arima function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option
-                            if no arima model can be estimated, will raise an error
+                            because the function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option
+                            if no model can be estimated, will raise an error
                         P : int, default 1
                             the number of seasonal lags to add to the model
                         boxcox : bool, default False
@@ -1809,9 +1809,9 @@ class Forecaster:
                         exclude : list, default None
                             manually exlcude some models
                             all models passed here will be excluded
-                            if models parameters starts with "top" and one of those top models is in the list passed to exclude, that model will be excluded 
+                            if models parameters starts with "top" and one of those top models is in the list passed to exclude, that model will be excluded, and the other however many will be averaged (so you might only get 3 models averaged if you pass "top_4" for example)
                         call_me : str, default "average"
-                            what to call the evaluated model -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         test_length : int or "max", default "max"
                             the test length to assign to the average model
                             if max, it will use the maximum test_length that all saved models can support
@@ -1965,8 +1965,10 @@ class Forecaster:
 
     def export_to_df(self,which='top_1',save_csv=False,csv_name='forecast_results.csv'):
         """ exports a forecast or forecasts to a pandas dataframe with future dates as the index and each exported forecast as a column
+        	returns a pandas dataframe
             will fail if you attempt to export forecasts of varying lengths
-            Parameters: which : starts with "top_", "all", or list; default "best"
+            by default, exports the best evaluated model by MAPE
+            Parameters: which : starts with "top_", "all", or list; default "top_1"
                             which forecasts to export
                             if a list, should be a list of model nicknames
                         save_csv : bool, default False
