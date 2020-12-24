@@ -470,6 +470,10 @@ class Forecaster:
                         repeats : int, default 20
                             the number of models to average with different starting points
         """
+        if start == 'auto':
+            try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
+            except: raise ValueError('could not set start automatically, try passing argument manually')
+
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -604,13 +608,15 @@ class Forecaster:
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
-            data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
-            data_train <- data[1:(nrow(data)-{test_length}),,drop=FALSE]
-            data_test <- data[(nrow(data)-{test_length} + 1):nrow(data),,drop=FALSE]
+            start_p <- c{start}
+            interval <- {interval}
+            test_length <- {test_length}
             
-            y <- data$y
-            y_train <- y[1:(nrow(data)-{test_length})]
-            y_test <- y[(nrow(data)-{test_length} + 1):nrow(data)]
+            data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
+            
+            y <- ts(data$y,start=start_p,deltat=1/interval)
+            y_train <- subset(y,start=1,end=nrow(data)-test_length)
+            y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
             
             """)
 
