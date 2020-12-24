@@ -440,6 +440,121 @@ class Forecaster:
         k = Counter(ext_reg) 
         self.ordered_xreg = [h[0] for h in k.most_common()] # this should give us the ranked external regressors
 
+    def forecast_nnetar(self,test_length=1,start='auto',interval=12,Xvars=None,boxcox=False,scale_inputs=True,repeats=20,call_me='nnetar'):
+        """ Neural Network Time Series Forecast
+            uses nnetar function from the forecast package in R
+            Parameters: test_length : int, default 1
+                            the number of periods to holdout in order to test the model
+                            must be at least 1 (AssertionError raised if not)
+                        start : tuple of length 2 or "auto", default "auto"
+                            1st element is the start year
+                            2nd element is the start period in the appropriate interval
+                            for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)
+                            if "auto", assumes the dates in self.current_dates are monthly in yyyy-mm-01 format and will use the first element in the list 
+                        interval : 1 of {1,2,4,12}, default 12
+                            1 for annual, 2 for bi-annual, 4 for quarterly, 12 for monthly
+                            unfortunately, x13 does not allow for more granularity than the monthly level
+                        Xvars : list, "all", None, or starts with "top_", default None
+                            the independent variables used to make predictions
+                            if it is a list, will attempt to estimate a model with that list of Xvars
+                            if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
+                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
+                            if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation
+                            because the auto.arima function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option
+                            if no arima model can be estimated, will raise an error
+                        boxcox : bool, default False
+                            whether to use a boxcox transformation on y
+                        scale_inputs : bool, default True
+                            whether to scale the inputs, performed after the boxcox transformation if that is set to True
+                        repeats : int, default 20
+                            the number of models to average with different starting points
+        """
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        self.info[call_me] = self._get_info_dict()
+        self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=Xvars)
+
+        ro.r(f"""
+            rm(list=ls())
+            setwd('{rwd}')
+            data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
+            data_train <- data[1:(nrow(data)-{test_length}),,drop=FALSE]
+            data_test <- data[(nrow(data)-{test_length} + 1):nrow(data),,drop=FALSE]
+            
+            y <- data$y
+            y_train <- y[1:(nrow(data)-{test_length})]
+            y_test <- y[(nrow(data)-{test_length} + 1):nrow(data)]
+            
+            """)
+
+        ro.r("""
+            if (ncol(data) > 1){
+                future_externals = read.csv('tmp/tmp_r_future.csv')
+                externals = names(data)[2:ncol(data)]
+                xreg_c <- as.matrix(data[,externals])
+                xreg_tr <- as.matrix(data_train[,externals])
+                xreg_te <- as.matrix(data_test[,externals])
+                xreg_f <- as.matrix(future_externals[,externals])
+            } else {
+                xreg_c <- NULL
+                xreg_tr <- NULL
+                xreg_te <- NULL
+                xreg_f <- NULL
+            }
+            ar <- auto.arima(y_train,xreg=xreg_tr)
+            f <- forecast(ar,xreg=xreg_te,h=length(y_test))
+            # f[[4]] are point estimates, f[[1]] is the ARIMA form
+            p <- f[[4]]
+            arima_form <- f[[1]]
+            write <- data.frame(actual=y_test,
+                                forecast=p)
+            write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
+            write$model_form <- arima_form
+            write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+        """)
+        
+        ro.r(f"""
+            ar <- auto.arima(y,max.order=10,stepwise=F,xreg=xreg_c)
+            f <- forecast(ar,xreg=xreg_f,h={self.forecast_out_periods})
+            p <- f[[4]]
+            arima_form <- f[[1]]
+            
+            write <- data.frame(forecast=p)
+            write$model_form <- arima_form
+            write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+
+            write <- data.frame(fitted = fitted(ar))
+            write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
+        """)
+        
+        ro.r("""
+            summary_df = data.frame(coef=rev(coef(ar)),se=rev(sqrt(diag(vcov(ar)))))
+            if (exists('externals')){row.names(summary_df)[1:length(externals)] <- externals}
+            summary_df$tvalue = summary_df$coef/summary_df$se
+            write.csv(summary_df,'tmp/tmp_summary_output.csv')
+        """)
+
+        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+        tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
+
+        self.mape[call_me] = tmp_test_results['APE'].mean()
+        self.forecasts[call_me] = list(tmp_forecast['forecast'])
+        
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
+        self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
+        self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
+        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
+        self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
+
+        if self.feature_importance[call_me].shape[0] > 0: # for the (0,i,0) model case
+            self.feature_importance[call_me]['pval'] = stats.t.sf(np.abs(self.feature_importance[call_me]['tvalue']), len(self.y)-1)*2 # https://stackoverflow.com/questions/17559897/python-p-value-from-t-statistic
+        else:
+            self.feature_importance.pop(call_me)
+
     def forecast_auto_arima(self,test_length=1,Xvars=None,call_me='auto_arima'):
         """ Auto-Regressive Integrated Moving Average 
             forecasts using auto.arima from the forecast package in R
@@ -566,7 +681,7 @@ class Forecaster:
         else:
             self.feature_importance.pop(call_me)
 
-    def forecast_sarimax13(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='sarimax13',error='raise'):
+    def forecast_sarimax13(self,test_length=1,start='auto',interval=12,Xvars=None,call_me='sarimax13',error='raise'):
         """ Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/
             Forecasts using the seas function from the seasonal package, also need the X13 software (x13as.exe) saved locally
             Automatically takes the best model ARIMA model form that fulfills a certain set of criteria (low forecast error rate, high statistical significance, etc)
@@ -575,7 +690,10 @@ class Forecaster:
             Documentation: https://cran.r-project.org/web/packages/seasonal/seasonal.pdf, http://www.seasonal.website/examples.html
             This package only allows for monthly or less granular observations, and only three years or fewer of predictions
             when a series does not have a lot of seasonality, sometimes the model fails, also when it tries to add the same outlier in two different ways
-            Parameters: start : tuple of length 2 or "auto", default "auto"
+            Parameters: test_length : int, default 1
+                            the number of periods to holdout in order to test the model
+                            must be at least 1 (AssertionError raised if not)
+                        start : tuple of length 2 or "auto", default "auto"
                             1st element is the start year
                             2nd element is the start period in the appropriate interval
                             for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)
@@ -583,9 +701,6 @@ class Forecaster:
                         interval : 1 of {1,2,4,12}, default 12
                             1 for annual, 2 for bi-annual, 4 for quarterly, 12 for monthly
                             unfortunately, x13 does not allow for more granularity than the monthly level
-                        test_length : int, default 1
-                            the number of periods to holdout in order to test the model
-                            must be at least 1 (AssertionError raised if not)
                         Xvars : list, "all", None, or starts with "top_", default None
                             the independent variables used to make predictions
                             if it is a list, will attempt to estimate a model with that list of Xvars
