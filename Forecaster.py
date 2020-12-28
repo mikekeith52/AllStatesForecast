@@ -9,13 +9,17 @@ import rpy2.robjects as ro
 # make the working directory friendly for R
 rwd = os.getcwd().replace('\\','/')
 
+class ForecastFormatError(Exception):
+    pass
+
 class Forecaster:
     """ object to forecast time series data
         natively supports the extraction of FRED data, could be expanded to other APIs with few adjustments
         the following models are supported:
             adaboost (sklearn)
-            arima (R forecast pkg: auto.arima)
-            arima (statsmodels)
+            arima (R forecast pkg: auto.arima, no seasonal models)
+            arima (R forecast pkg: auto.arima, seasonal models)
+            arima (statsmodels, not automatically optimized)
             arima-x13 (R seasonal pkg: seas)
             average (any number of models can be averaged)
             ets (R forecast pkg: ets)
@@ -218,6 +222,63 @@ class Forecaster:
     def _get_info_dict(self):
         return dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape','fitted_values'])
 
+    def _ready_for_forecast(self,need_xreg=False):
+        """ runs before each attempted to forecast to make sure:
+                y is set as a list of numeric figures
+                current_dates is set as a list of datetime objects
+                future_dates is set as a list of datetime objects
+                if current_xreg is set, future_xreg is also set and both are dictionaries
+        """
+        _no_error_ = 'before forecasting, the following issues need to be corrected:'
+        error = _no_error_
+        if isinstance(self.y,list):
+            try:
+                [float(i) for i in self.y]
+            except ValueError:
+                error += '\n  all elements in y attribute must be numeric'
+        else:
+            error += f'\n  y attribute must be a list, not {type(self.y)}'
+
+        dates = {'current_dates':self.current_dates,'future_dates':self.future_dates}
+        for k,v in dates.items():
+            if isinstance(v,list):
+                try:
+                    v = pd.to_datetime(v).to_list()
+                except:
+                    error+=f'\n  the elements in the {k} attribute must be able to be parsed by pandas date parser -- try passing each element in yyyy-mm-dd format'
+            else:
+                error+=f'\n  {k} attribute must be a list, got {type(v)}'
+
+        if not isinstance(self.forecast_out_periods,int):
+            error+=f'\n  the forecast_out_periods attribute must be an integer type, found {type(self.forecast_out_periods)}'
+
+        if (self.current_xreg is None) & (need_xreg):
+            error+='\n  the forecast you are attempting to run needs at least one external regressor to work, could not find any in the current_xreg attribute'
+        else:
+            if isinstance(self.current_xreg,dict):
+                if not isinstance(self.future_xreg,dict):
+                    error+=f'\n  if you are passing external regressors to the current_xreg attribute, the future_xreg attribute must also be a dictionary type, found {type(self.future_xreg)} type'
+                else:
+                    for k in self.current_xreg.keys():
+                        if k not in self.future_xreg.keys():
+                            error+=f'\n  all keys in the current_xreg attribute must also be present in the future_xreg attribute, could not find {k}'
+                    for k, v in self.current_xreg.items():
+                        if (not isinstance(v,list)) | (not isinstance(self.future_xreg[k],list)):
+                            error+=f'\n  all values in the current_xreg and future_xreg dictionaries must be list types, check the {k} key'
+                        elif len(v) != len(self.y):
+                            error+=f'\n all values in the current_xreg dictionary must be the same length as the y attribute, check {k}'
+                        elif len(self.future_xreg[k]) != self.forecast_out_periods:
+                            error+=f'\n  all values in the future_xreg dictionary must be the same length as the forecast_out_periods attribute value ({self.forecast_out_periods}), check {k}'
+                        elif np.isnan(v).sum() > 0:
+                            f'\n  cannot have missing values in any of the current_xreg values, check {k}'
+                        elif np.isnan(self.future_xreg[k]).sum() > 0:
+                            f'\n  cannot have missing values in any of the future_xreg values, check {k}'
+            elif not self.current_xreg is None:
+                error+=f'\n  current_xreg attribute must be a dict type if attempting to use external regressors, or None if not, found {type(self.current_xreg)}'
+
+        if len(error) > len(_no_error_):
+            raise ForecastFormatError(error)
+
     def get_data_fred(self,series,date_start='1900-01-01'):
         """ imports data from FRED into a pandas dataframe
             stores the results in self.name, self.y, and self.current_dates
@@ -249,14 +310,13 @@ class Forecaster:
             assumes the dataframe is aggregated to the same timeframe as self.y (monthly, quarterly, etc.)
             for more complex processing, perform manipulations before passing through this function
             stores results in self.current_xreg, self.future_xreg, self.future_dates, and self.forecast_out_periods
-            Parameters: xreg_df : pandas dataframe
+            Parameters: xreg_df : pandas dataframe, required
                             this should include only independent regressors either in numeric form or that can be dummied into a 1/0 variable as well as a date column that can be parsed by pandas
                             do not include the dependent variable value
                         date_col : str, requried
-                            the name of the date column in xreg_df that can be parsed with the pandas.to_datetime() function, if available
-                            if no date column available, pass None -- assumes none of the columns are dates and that all dataframe obs start at the same time as self.y
-                            always better to pass a date column when available
-                        process_columns : str, dict, or False
+                            the name of the date column in xreg_df that can be parsed with the pandas.to_datetime() function
+                            cannot be None
+                        process_columns : str, dict, or False; optional
                             how to process columns with missing data
                             supported: {'remove','impute_mean','impute_median','impute_mode','impute_min','impute_max',impute_0','forward_fill','backward_fill','impute_random'}
                             if str, must be one of supported and that method is applied to all columns with missing data
@@ -290,10 +350,9 @@ class Forecaster:
         def _backward_fill_(c): xreg_df[c].fillna(method='bfill',inplace=True)
         def _impute_random_(c): xreg_df.loc[xreg_df[c].isnull(),c] = xreg_df[c].dropna().sample(xreg_df.loc[xreg_df[c].isnull()].shape[0]).to_list()
 
-        if not date_col is None:
-            xreg_df[date_col] = pd.to_datetime(xreg_df[date_col])
-            self.future_dates = xreg_df.loc[xreg_df[date_col] > list(self.current_dates)[-1],date_col].to_list()
-            xreg_df = xreg_df.loc[xreg_df[date_col] >= self.current_dates[0]]
+        xreg_df[date_col] = pd.to_datetime(xreg_df[date_col])
+        self.future_dates = xreg_df.loc[xreg_df[date_col] > list(self.current_dates)[-1],date_col].to_list()
+        xreg_df = xreg_df.loc[xreg_df[date_col] >= self.current_dates[0]]
         xreg_df = pd.get_dummies(xreg_df,drop_first=True)
 
         if not not process_columns:
@@ -308,50 +367,14 @@ class Forecaster:
             else:
                 raise ValueError(f'argument passed to process_columns not supported: {process_columns}')
 
-        if not date_col is None:
-            current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
-            future_xreg_df = xreg_df.loc[xreg_df[date_col] > list(self.current_dates)[-1]].drop(columns=date_col)        
-        else:
-            current_xreg_df = xreg_df.iloc[:len(self.y)]
-            future_xreg_df = xreg_df.iloc[len(self.y):]
+        current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
+        future_xreg_df = xreg_df.loc[xreg_df[date_col] > list(self.current_dates)[-1]].drop(columns=date_col)        
 
         assert current_xreg_df.shape[0] == len(self.y), 'something is wrong with the passed dataframe--make sure the dataframe is at least one observation greater in length than y and specify a date column if one available'
         self.forecast_out_periods = future_xreg_df.shape[0]
         self.current_xreg = current_xreg_df.to_dict(orient='list')
         self.future_xreg = future_xreg_df.to_dict(orient='list')
-
-    def set_and_check_data_types(self,check_xreg=True):
-        """ changes all attributes in self to the object type they should be (list, str, dict, etc.)
-            if a conversion is unsuccessful, will raise an error
-            good idea to run this before beginning forecasts in case something in the object isn't loaded the way it should be
-            Parameters: check_xreg : bool, default True
-                if True, checks that self.current_xreg and self.future_xregs are dict types (raises an error if check fails)
-                change this to False if wanting to perform forecasts without any predictors
-        """
-        self.name = str(self.name) if not isinstance(self.name,str) else self.name
-        self.y = list(self.y) if not isinstance(self.y,list) else self.y
-        self.current_dates = pd.to_datetime(self.current_dates).to_list()
-        self.future_dates = pd.to_datetime(self.future_dates).to_list()
-        self.forecast_out_periods = int(self.forecast_out_periods)
-        if check_xreg:
-            assert isinstance(self.current_xreg,dict), f'current_xreg must be dict type, not {type(self.current_xreg)}'
-            assert isinstance(self.future_xreg,dict), f'future_xreg must be dict type, not {type(self.future_xreg)}'
         
-    def check_xreg_future_current_consistency(self):
-        """ checks that the self.y is same size as self.current_dates
-            checks that self.y is same size as the values in self.current_xreg
-            checks that self.future_dates is same size as the values in self.future_xreg
-            checks if there are missing values in the xreg dictionary values
-            if any of these checks fails, raises an AssertionError
-            good idea to run this right after loading the xreg_df to make sure that process was successful
-        """
-        for k, v in self.current_xreg.items():
-            assert len(self.y) == len(self.current_dates), f'the length of y ({len(self.y)}) and the length of current_dates ({len(self.current_dates)}) do not match!'
-            assert len(self.current_xreg[k]) == len(self.y), f'the length of {k} ({len(v)}) stored in the current_xreg dict is not the same length as y ({len(self.y)})'
-            assert k in self.future_xreg.keys(), f'{k} not found in the future_xreg dict!'
-            assert len(self.future_xreg[k]) == len(self.future_dates), f'the length of {k} ({len(self.future_xreg[k])}) stored in the future_xreg dict is not the same length as future_dates ({len(self.future_dates)})'
-            assert np.isnan(v).sum() == 0, f'missing values observed in current_xreg dictionary: {k} key for (up to first 5) dates {[d for d, val in zip(self.current_dates,np.isnan(v)) if val][:5]}'
-
     def set_forecast_out_periods(self,n):
         """ sets the self.forecast_out_periods attribute and truncates self.future_dates and self.future_xreg if needed
             Parameters: n : int
@@ -441,9 +464,10 @@ class Forecaster:
         k = Counter(ext_reg) 
         self.ordered_xreg = [h[0] for h in k.most_common()] # this should give us the ranked external regressors
 
-    def forecast_nnetar(self,test_length=1,start='auto',interval=12,Xvars=None,P=1,boxcox=False,scale_inputs=True,repeats=20,call_me='nnetar'):
+    def forecast_nnetar(self,test_length=1,start='auto',interval=12,Xvars=None,P=1,boxcox=False,scale_inputs=True,repeats=20,negative_y='raise',call_me='nnetar'):
         """ Neural Network Time Series Forecast
             uses nnetar function from the forecast package in R
+            this forecast does not work when there are negative or 0 values in the dependent variable
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -471,7 +495,23 @@ class Forecaster:
                             whether to scale the inputs, performed after the boxcox transformation if that is set to True
                         repeats : int, default 20
                             the number of models to average with different starting points
+                        negative_y : one of {'raise','skip'}, default 'raise'
+                            what to do if negative or 0 values are observed in the y attribute
+                            'raise' will raise a ValueError
+                            'skip' will not attempt to evaluate a model without raising an error
+                        call_me : str, default "auto_arima"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
+        self._ready_for_forecast()
+
+        if min(self.y) <= 0:
+            if negative_y == 'raise':
+                raise ValueError('cannot estimate nnetar model, negative or 0 values observed in the y attribute')
+            elif negative_y == 'skip':
+                return None
+            else:
+                raise ValueError(f'argument in negative_y not recognized: {negative_y}')
+
         if start == 'auto':
             try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
             except: raise ValueError('could not set start automatically, try passing argument manually')
@@ -494,6 +534,10 @@ class Forecaster:
         else:
             raise ValueError(f'argument passed to scale_inputs not recognized: {scale_inputs}')
 
+        try:
+            float(interval)
+        except ValueError:
+            raise ValueError(f'interval must be numeric type, got {type(interval)}')
 
         self.info[call_me] = self._get_info_dict()
         self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=Xvars)
@@ -541,8 +585,14 @@ class Forecaster:
             f <- forecast(ar,xreg=xreg_te,h=length(y_test))
             p <- f$mean
             nn_form <- f$method
-            write <- data.frame(actual=y_test,
-                                forecast=p)
+            if (test_length==1){
+              write <- data.frame(actual=y_test[1],
+                                forecast=p[1])
+            } else {
+              write <- data.frame(actual=y_test,
+                                forecast=p)            
+            }
+
             write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
             write$model_form <- nn_form
             write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
@@ -576,11 +626,13 @@ class Forecaster:
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
         self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
+        self.feature_importance[call_me] = pd.DataFrame(index=pd.read_csv('tmp/tmp_r_current.csv').iloc[:,1:].columns.to_list())
 
     def forecast_auto_arima(self,test_length=1,Xvars=None,call_me='auto_arima'):
         """ Auto-Regressive Integrated Moving Average 
             forecasts using auto.arima from the forecast package in R
-            uses an algorithm to find the best ARIMA model automatically by minimizing in-sample aic, checks for seasonality (but doesn't work very well)
+            uses an algorithm to find the best ARIMA model automatically by minimizing in-sample aic
+            does not search seasonal models
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -604,13 +656,11 @@ class Forecaster:
             'test_set_actuals': [2.4, 2.4, ..., 5.0, 4.1],
             'test_set_predictions': [2.36083282553252, 2.3119957980461803, ..., 2.09177057271149, 2.08127132827637], 
             'test_set_ape': [0.0163196560281154, 0.03666841748076, ..., 0.581645885457702, 0.49237284676186205]}
-
             >>> print(f.forecasts['arima'])
             [4.000616524942799, 4.01916650578768, ..., 3.7576542462753904, 3.7576542462753904]
             
             >>> print(f.mape['arima'])
             0.4082393522799069
-
             >>> print(f.feature_importance['arima']) # stored as a pandas dataframe
                 coef        se    tvalue          pval
             ma5  0.189706  0.045527  4.166858  3.598788e-05
@@ -619,6 +669,7 @@ class Forecaster:
             ma2 -0.257684  0.044522 -5.787802  1.213441e-08
             ma1  0.222933  0.042513  5.243861  2.265347e-07
         """
+        self._ready_for_forecast()
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -626,6 +677,7 @@ class Forecaster:
         ro.r(f"""
             rm(list=ls())
             setwd('{rwd}')
+            h <- {self.forecast_out_periods}
             data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
             data_train <- data[1:(nrow(data)-{test_length}),,drop=FALSE]
             data_test <- data[(nrow(data)-{test_length} + 1):nrow(data),,drop=FALSE]
@@ -659,11 +711,140 @@ class Forecaster:
             write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
             write$model_form <- arima_form
             write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
-        """)
-        
-        ro.r(f"""
+
             ar <- auto.arima(y,max.order=10,stepwise=F,xreg=xreg_c)
-            f <- forecast(ar,xreg=xreg_f,h={self.forecast_out_periods})
+            f <- forecast(ar,xreg=xreg_f,h=h)
+            p <- f[[4]]
+            arima_form <- f[[1]]
+            
+            write <- data.frame(forecast=p)
+            write$model_form <- arima_form
+            write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+            write <- data.frame(fitted = fitted(ar))
+            write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
+
+            summary_df = data.frame(coef=rev(coef(ar)),se=rev(sqrt(diag(vcov(ar)))))
+            if (exists('externals')){row.names(summary_df)[1:length(externals)] <- externals}
+            summary_df$tvalue = summary_df$coef/summary_df$se
+            write.csv(summary_df,'tmp/tmp_summary_output.csv')
+        """)
+
+        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+        tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
+
+        self.mape[call_me] = tmp_test_results['APE'].mean()
+        self.forecasts[call_me] = list(tmp_forecast['forecast'])
+        
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
+        self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
+        self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
+        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
+        self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
+
+        if self.feature_importance[call_me].shape[0] > 0: # for the (0,i,0) model case
+            self.feature_importance[call_me]['pval'] = stats.t.sf(np.abs(self.feature_importance[call_me]['tvalue']), len(self.y)-1)*2 # https://stackoverflow.com/questions/17559897/python-p-value-from-t-statistic
+        else:
+            self.feature_importance.pop(call_me)
+
+    def forecast_auto_arima_seas(self,start='auto',interval=12,test_length=1,Xvars=None,call_me='auto_arima_seas'):
+        """ Auto-Regressive Integrated Moving Average 
+            forecasts using auto.arima from the forecast package in R
+            searches seasonal models, but the algorithm isn't as complex as forecast_auto_arima() and is harder to set up
+            Parameters: test_length : int, default 1
+                            the number of periods to holdout in order to test the model
+                            must be at least 1 (AssertionError raised if not)
+                        start : tuple of length 2 or "auto", default "auto"
+                            1st element is the start year
+                            2nd element is the start period in the appropriate interval
+                            for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)
+                            if "auto", assumes the dates in self.current_dates are monthly in yyyy-mm-01 format and will use the first element in the list 
+                        interval : float, default 12
+                            the number of periods in one season (365.25 for annual, 12 for monthly, etc.)
+                        Xvars : list, "all", None, or starts with "top_", default None
+                            the independent variables used to make predictions
+                            if it is a list, will attempt to estimate a model with that list of Xvars
+                            if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
+                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
+                            if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation
+                            because the auto.arima function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option
+                            if no arima model can be estimated, will raise an error
+                        call_me : str, default "auto_arima_seas"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
+        """
+        self._ready_for_forecast()
+        if start == 'auto':
+            try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
+            except: raise ValueError('could not set start automatically, try passing argument manually')
+
+        try:
+            float(interval)
+        except ValueError:
+            raise ValueError(f'interval must be numeric type, got {type(interval)}')
+
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        self.info[call_me] = self._get_info_dict()
+        self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=Xvars)
+        ro.r(f"""
+            rm(list=ls())
+            setwd('{rwd}')
+            start_p <- c{start}
+            interval <- {interval}
+            test_length <- {test_length}
+            h <- {self.forecast_out_periods}
+            
+            data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
+            
+            y <- ts(data$y,start=start_p,deltat=1/interval)
+            y_train <- subset(y,start=1,end=nrow(data)-test_length)
+            y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
+            
+            """)
+
+        ro.r("""
+            if (ncol(data) > 1){
+              future_externals = data.frame(read.csv('tmp/tmp_r_future.csv'))
+              externals <- names(data)[2:ncol(data)]
+              data_c <- data[,externals, drop=FALSE]
+              data_f <- future_externals[,externals, drop=FALSE]
+              all_externals_ts <- ts(rbind(data_c,data_f),start=start_p,deltat=1/interval)
+              xreg_c <- subset(all_externals_ts,start=1,end=nrow(data))
+              xreg_tr <- subset(all_externals_ts,start=1,end=nrow(data)-test_length)
+              xreg_te <- subset(all_externals_ts,start=nrow(data)-test_length+1,end=nrow(data))
+              if (test_length == 1){
+                xreg_te <- t(xreg_te)
+              }
+              xreg_f <- subset(all_externals_ts,start=nrow(data)+1)
+            } else {
+              xreg_c <- NULL
+              xreg_tr <- NULL
+              xreg_te <- NULL
+              xreg_f <- NULL
+            }
+            ar <- auto.arima(y_train,xreg=xreg_tr)
+            f <- forecast(ar,xreg=xreg_te,h=length(y_test))
+            # f[[4]] are point estimates, f[[1]] is the ARIMA form
+            p <- f[[4]]
+            arima_form <- f[[1]]
+
+            if (test_length==1){
+              write <- data.frame(actual=y_test[1],
+                                forecast=p[1])
+            } else {
+              write <- data.frame(actual=y_test,
+                                forecast=p)            
+            }            
+            write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
+            write$model_form <- arima_form
+            write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+
+            ar <- auto.arima(y,xreg=xreg_c)
+            f <- forecast(ar,xreg=xreg_f,h=h)
             p <- f[[4]]
             arima_form <- f[[1]]
             
@@ -673,9 +854,7 @@ class Forecaster:
 
             write <- data.frame(fitted = fitted(ar))
             write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
-        """)
-        
-        ro.r("""
+
             summary_df = data.frame(coef=rev(coef(ar)),se=rev(sqrt(diag(vcov(ar)))))
             if (exists('externals')){row.names(summary_df)[1:length(externals)] <- externals}
             summary_df$tvalue = summary_df$coef/summary_df$se
@@ -740,6 +919,7 @@ class Forecaster:
                             errors are common even if you specify everything correctly -- it has to do with the X13 estimator itself
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
+        self._ready_for_forecast()
         if start == 'auto':
             try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
             except: raise ValueError('could not set start automatically, try passing argument manually')
@@ -851,6 +1031,7 @@ class Forecaster:
         """
         from statsmodels.tsa.arima.model import ARIMA
 
+        self._ready_for_forecast()
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -907,6 +1088,7 @@ class Forecaster:
         """
         from statsmodels.tsa.holtwinters import ExponentialSmoothing as HWES
 
+        self._ready_for_forecast()
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -952,6 +1134,8 @@ class Forecaster:
         """
         from statsmodels.tsa.holtwinters import ExponentialSmoothing as HWES
         from itertools import product
+
+        self._ready_for_forecast()
         expand_grid = lambda d: pd.DataFrame([row for row in product(*d.values())],columns=d.keys())
 
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1027,6 +1211,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
+        self._ready_for_forecast()
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
 
@@ -1036,7 +1221,6 @@ class Forecaster:
             rm(list=ls())
             setwd('{rwd}')
             data <- read.csv('tmp/tmp_r_current.csv')
-
             y <- data$y
             y_train <- y[1:(nrow(data)-{test_length})]
             y_test <- y[(nrow(data)-{test_length} + 1):nrow(data)]
@@ -1051,7 +1235,6 @@ class Forecaster:
             write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
             write$model_form <- tbats_form
             write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
-
             ar <- tbats(y)
             f <- forecast(ar,xreg=xreg_f,h={self.forecast_out_periods})
             p <- f[[2]]
@@ -1060,7 +1243,6 @@ class Forecaster:
             write <- data.frame(forecast=p)
             write$model_form <- tbats_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
-
             write <- data.frame(fitted = fitted(ar))
             write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
         """)
@@ -1090,6 +1272,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
+        self._ready_for_forecast()
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
 
@@ -1099,7 +1282,6 @@ class Forecaster:
             rm(list=ls())
             setwd('{rwd}')
             data <- read.csv('tmp/tmp_r_current.csv')
-
             y <- data$y
             y_train <- y[1:(nrow(data)-{test_length})]
             y_test <- y[(nrow(data)-{test_length} + 1):nrow(data)]
@@ -1114,7 +1296,6 @@ class Forecaster:
             write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
             write$model_form <- ets_form
             write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
-
             ar <- ets(y)
             f <- forecast(ar,xreg=xreg_f,h={self.forecast_out_periods})
             p <- f[[2]]
@@ -1123,7 +1304,6 @@ class Forecaster:
             write <- data.frame(forecast=p)
             write$model_form <- ets_form
             write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
-
             write <- data.frame(fitted = fitted(ar))
             write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
         """)
@@ -1184,6 +1364,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
+        self._ready_for_forecast()
         if len(series) == 0:
             raise ValueError('cannot run var -- need at least 1 series passed to *series')
         series_df = pd.DataFrame()
@@ -1396,6 +1577,7 @@ class Forecaster:
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
+        self._ready_for_forecast()
         if len(cids) == 0:
             raise ValueError('cannot run vecm -- need at least 1 cointegrated series in a list that is same length as y passed to *cids--no list found')
         cid_df = pd.DataFrame()
@@ -1587,6 +1769,7 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.ensemble import RandomForestRegressor
+        self._ready_for_forecast(True)
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -1616,6 +1799,7 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.ensemble import GradientBoostingRegressor
+        self._ready_for_forecast(True)
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -1645,6 +1829,7 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.ensemble import AdaBoostRegressor
+        self._ready_for_forecast(True)
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -1674,6 +1859,7 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.neural_network import MLPRegressor
+        self._ready_for_forecast(True)
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -1700,6 +1886,7 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.linear_model import LinearRegression
+        self._ready_for_forecast(True)
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -1729,6 +1916,7 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.linear_model import Ridge
+        self._ready_for_forecast(True)
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -1758,6 +1946,7 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.linear_model import Lasso
+        self._ready_for_forecast(True)
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -1787,6 +1976,7 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from sklearn.svm import SVR
+        self._ready_for_forecast(True)
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
         assert test_length >= 1, 'test_length must be at least 1'
         self.info[call_me] = self._get_info_dict()
@@ -2002,5 +2192,3 @@ class Forecaster:
             df.to_csv(csv_name)
 
         return df
-
-
