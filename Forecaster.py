@@ -251,6 +251,9 @@ class Forecaster:
 
         if not isinstance(self.forecast_out_periods,int):
             error+=f'\n  the forecast_out_periods attribute must be an integer type, found {type(self.forecast_out_periods)}'
+        else:
+            if self.forecast_out_periods < 1:
+                error+=f'\n  forecast_out_periods must be at least 1 (is {self.forecast_out_periods})'
 
         if (self.current_xreg is None) & (need_xreg):
             error+='\n  the forecast you are attempting to run needs at least one external regressor to work, could not find any in the current_xreg attribute'
@@ -315,7 +318,6 @@ class Forecaster:
                             do not include the dependent variable value
                         date_col : str, requried
                             the name of the date column in xreg_df that can be parsed with the pandas.to_datetime() function
-                            cannot be None
                         process_columns : str, dict, or False; optional
                             how to process columns with missing data
                             supported: {'remove','impute_mean','impute_median','impute_mode','impute_min','impute_max',impute_0','forward_fill','backward_fill','impute_random'}
@@ -370,7 +372,7 @@ class Forecaster:
         current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
         future_xreg_df = xreg_df.loc[xreg_df[date_col] > list(self.current_dates)[-1]].drop(columns=date_col)        
 
-        assert current_xreg_df.shape[0] == len(self.y), 'something is wrong with the passed dataframe--make sure the dataframe is at least one observation greater in length than y and specify a date column if one available'
+        assert current_xreg_df.shape[0] == len(self.y), 'something is wrong with the passed dataframe--make sure the dataframe is at least one observation greater in length than y and specify a date column in date_col parameter'
         self.forecast_out_periods = future_xreg_df.shape[0]
         self.current_xreg = current_xreg_df.to_dict(orient='list')
         self.future_xreg = future_xreg_df.to_dict(orient='list')
@@ -2135,16 +2137,15 @@ class Forecaster:
                 print(print_text)
 
         # plots with dates if dates are available, else plots with ambiguous integers
-        sns.lineplot(x=pd.to_datetime(self.current_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.y)),y=self.y)
+        sns.lineplot(x=self.current_dates,y=self.y)
         labels = ['Actual']
 
         for m in plot_these_models:
             # plots with dates if dates are available, else plots with ambiguous integers
-            sns.lineplot(x=pd.to_datetime(self.future_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.forecasts[m])),y=self.forecasts[m])
+            sns.lineplot(x=self.future_dates,y=self.forecasts[m])
             labels.append(f'{m} forecast')
             if plot_fitted & (not self.info[m]['fitted_values'] is None) & (len(plot_these_models) == 1):
-                sns.lineplot(x=pd.to_datetime(self.current_dates) if (not self.current_dates is None) & (not self.future_dates is None) else range(len(self.y)),
-                    y=self.info[m]['fitted_values'],style=True,dashes=[(2,2)],hue=.5)
+                sns.lineplot(x=self.current_dates,y=self.info[m]['fitted_values'],style=True,dashes=[(2,2)],hue=.5)
                 labels.append(f'{m} fitted values')
 
         plt.legend(labels=labels,loc='best')
