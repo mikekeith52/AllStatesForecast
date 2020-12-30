@@ -2172,7 +2172,7 @@ class Forecaster:
                                 ex: csv_name = 'C:/NotWorkingDirectory/forecast_results.csv'
                                     csv_name = '../OtherParentDirectory/forecast_results.csv'
         """
-        df = pd.DataFrame(index=self.future_dates if not self.future_dates is None else range(self.forecast_out_periods))
+        df = pd.DataFrame(index=self.future_dates)
         if isinstance(which,str):
             if (which == 'all') | (which.startswith('top_') & (int(which.split('_')[1]) > len(self.forecasts.keys()))):
                 for m in self.order_all_forecasts_best_to_worst()[:]:
