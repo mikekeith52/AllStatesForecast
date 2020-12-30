@@ -235,15 +235,18 @@ class Forecaster:
             try:
                 [float(i) for i in self.y]
             except ValueError:
-                error += '\n  all elements in y attribute must be numeric'
+                error+='\n  all elements in y attribute must be numeric'
         else:
-            error += f'\n  y attribute must be a list, not {type(self.y)}'
+            error+=f'\n  y attribute must be a list, not {type(self.y)}'
 
         dates = {'current_dates':self.current_dates,'future_dates':self.future_dates}
         for k,v in dates.items():
             if isinstance(v,list):
                 try:
-                    v = pd.to_datetime(v).to_list()
+                    if k == 'current_dates':
+                        self.current_dates = pd.to_datetime(v).to_list()
+                    else:
+                        self.future_dates = pd.to_datetime(v).to_list()
                 except:
                     error+=f'\n  the elements in the {k} attribute must be able to be parsed by pandas date parser -- try passing each element in yyyy-mm-dd format'
             else:
@@ -273,9 +276,9 @@ class Forecaster:
                         elif len(self.future_xreg[k]) != self.forecast_out_periods:
                             error+=f'\n  all values in the future_xreg dictionary must be the same length as the forecast_out_periods attribute value ({self.forecast_out_periods}), check {k}'
                         elif np.isnan(v).sum() > 0:
-                            f'\n  cannot have missing values in any of the current_xreg values, check {k}'
+                            error+=f'\n  cannot have missing values in any of the current_xreg values, check {k}'
                         elif np.isnan(self.future_xreg[k]).sum() > 0:
-                            f'\n  cannot have missing values in any of the future_xreg values, check {k}'
+                            error+=f'\n  cannot have missing values in any of the future_xreg values, check {k}'
             elif not self.current_xreg is None:
                 error+=f'\n  current_xreg attribute must be a dict type if attempting to use external regressors, or None if not, found {type(self.current_xreg)}'
 
@@ -319,11 +322,11 @@ class Forecaster:
                         date_col : str, requried
                             the name of the date column in xreg_df that can be parsed with the pandas.to_datetime() function
                         process_columns : str, dict, or False; optional
-                            how to process columns with missing data
+                            how to process columns with missing data - most forecasts will not run when missing data is present in either xreg dict
                             supported: {'remove','impute_mean','impute_median','impute_mode','impute_min','impute_max',impute_0','forward_fill','backward_fill','impute_random'}
                             if str, must be one of supported and that method is applied to all columns with missing data
                             if dict, key is a column and value is one of supported, method only applied to columns with missing data                  
-                            'impute_random' will fill in missing values with random values from the same column
+                            'impute_random' will fill in missing values with random draws from the same column
            
             >>> xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
             >>> f = Forecaster(y=[4,5,9],current_dates=['2020-01-01','2020-02-01','2020-03-01'])
@@ -372,7 +375,7 @@ class Forecaster:
         current_xreg_df = xreg_df.loc[xreg_df[date_col].isin(self.current_dates)].drop(columns=date_col)
         future_xreg_df = xreg_df.loc[xreg_df[date_col] > list(self.current_dates)[-1]].drop(columns=date_col)        
 
-        assert current_xreg_df.shape[0] == len(self.y), 'something is wrong with the passed dataframe--make sure the dataframe is at least one observation greater in length than y and specify a date column in date_col parameter'
+        assert current_xreg_df.shape[0] == len(self.y), 'something went wrong--make sure the dataframe spans the entire date-range as y and is at least one observation to the future and specify a date column in date_col parameter'
         self.forecast_out_periods = future_xreg_df.shape[0]
         self.current_xreg = current_xreg_df.to_dict(orient='list')
         self.future_xreg = future_xreg_df.to_dict(orient='list')
@@ -386,8 +389,7 @@ class Forecaster:
         if isinstance(n,int):
             if n >= 1:
                 self.forecast_out_periods = n
-                if isinstance(self.future_dates,list):
-                    self.future_dates = self.future_dates[:n]
+                self.future_dates = self.future_dates[:n]
                 if isinstance(self.future_xreg,dict):
                     for k,v in self.future_xreg.items():
                         self.future_xreg[k] = v[:n]
@@ -522,17 +524,13 @@ class Forecaster:
         assert test_length >= 1, 'test_length must be at least 1'
         assert isinstance(repeats,int), f'repeats must be an int, not {type(repeats)}'
 
-        if boxcox:
-            bc = 'T'
-        elif not boxcox:
-            bc = 'F'
+        if isinstance(boxcox,bool):
+            bc = str(boxcox)[0]
         else:
             raise ValueError(f'argument passed to boxcox not recognized: {boxcox}')
 
-        if scale_inputs:
-            si = 'T'
-        elif not scale_inputs:
-            si = 'F'
+        if isinstance(scale_inputs,bool):
+            si = str(scale_inputs)[0]
         else:
             raise ValueError(f'argument passed to scale_inputs not recognized: {scale_inputs}')
 
