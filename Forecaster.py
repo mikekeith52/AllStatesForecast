@@ -2090,6 +2090,37 @@ class Forecaster:
         x = [h[0] for h in Counter(self.mape).most_common()]
         return x[::-1] # reversed copy of the list
 
+    def pop_forecast(self,which):
+        """ deletes a forecast or list of forecasts from the object
+            Parameters: which : str or list-like
+                if str, that model will be popped
+                if not str, must be an iterable where elements are model nicknames stored in the object
+            >>> f = Forecaster()
+            >>> f.get_data_fred('UTUR')
+            >>> f.forecast_auto_arima()
+            >>> f.pop('auto_arima')
+            >>> print(f.forecasts)
+            {}
+            >>> print(f.info)
+            {}
+            >>> print(f.mape)
+            {}
+        """
+        if isinstance(which,str):
+            self.forecasts.pop(which)
+            self.mape.pop(which)
+            self.info.pop(which)
+            if which in self.feature_importance.keys():
+                self.feature_importance.pop(which)
+
+        else:
+            for m in which:
+                self.forecasts.pop(m)
+                self.mape.pop(m)
+                self.info.pop(m)
+                if m in self.feature_importance.keys():
+                    self.feature_importance.pop(m)
+
     def display_ts_plot(self,models='all',plot_fitted=False,print_model_form=False,print_mapes=False):
         """ Plots time series results of the stored forecasts
             All models plotted in order of best-to-worst mapes
