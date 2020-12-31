@@ -9,6 +9,7 @@ import rpy2.robjects as ro
 # make the working directory friendly for R
 rwd = os.getcwd().replace('\\','/')
 
+# add a descriptive error
 class ForecastFormatError(Exception):
     pass
 
@@ -17,26 +18,26 @@ class Forecaster:
         natively supports the extraction of FRED data, could be expanded to other APIs with few adjustments
         the following models are supported:
             adaboost (sklearn)
-            arima (R forecast pkg: auto.arima, no seasonal models)
-            arima (R forecast pkg: auto.arima, seasonal models)
+            auto_arima (R forecast::auto.arima, no seasonal models)
+            auto_arima_seas (R forecast::auto.arima, seasonal models)
             arima (statsmodels, not automatically optimized)
-            arima-x13 (R seasonal pkg: seas)
+            sarimax13 (Seasonal Auto Regressive Integrated Moving Average by X13 - R seasonal::seas)
             average (any number of models can be averaged)
-            ets (R forecast pkg: ets)
-            gradient boosted trees (sklearn)
-            holt-winters exponential smoothing (statsmodels)
-            holt-winters exponential smoothing (statsmodels, automated)
+            ets (exponental smoothing state space model - R forecast::ets)
+            gbt (gradient boosted trees - sklearn)
+            hwes (holt-winters exponential smoothing - statsmodels hwes)
+            auto_hwes (holt-winters exponential smoothing - statsmodels hwes)
             lasso (sklearn)
-            multi level perceptron (sklearn)
-            multi linear regression (sklearn)
+            mlp (multi level perceptron - sklearn)
+            mlr (multi linear regression - sklearn)
             naive (propagates final observed value forward)
-            random forest (sklearn)
+            rf (random forest - sklearn)
             ridge (sklearn)
-            support vector regressor (sklearn)
-            tbats (R forecast pkg: tbats)
-            time series neural network (R forecast pkg: nnetar)
-            var (R vars pkg: VAR)      
-            vecm (R tsDyn pkg: VECM)
+            svr (support vector regressor - sklearn)
+            tbats (exponential smoothing state space model With box-cox transformation, arma errors, trend, and seasonal component - R forecast::tbats)
+            time series neural network (R forecast::nnetar)
+            var (vector auto regression - R vars::VAR)      
+            vecm (vector error correction model - R tsDyn::VECM)
         more models can be added by building more methods
 
         for every evaluated model, the following information is stored in the object attributes:
@@ -45,33 +46,33 @@ class Forecaster:
                         'holdout_periods' : int - the number of periods held out in the test set
                         'model_form' : str - the name of the model with any hyperparameters, external regressors, etc
                         'test_set_actuals' : list - the actual figures from the test set
-                        'test_set_predictions' : list - the predicted figures from the test set evaluated with a model of the training set
+                        'test_set_predictions' : list - the predicted figures from the test set evaluated with a model from the training set
                         'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
                         'fitted_values' : list - the model's fitted values, when available. if not available, None
                 in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
                 in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
                 in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features' prediction power
                     if it is an sklearn model, it will be permutation feature importance from the eli5 package (https://eli5.readthedocs.io/en/latest/blackbox/permutation_importance.html)
-                    any other model, it is summary output with at least the coefficient magnitudes
-                    index is always the feature names (depending on how the models were run, the index won't always be labeled with the explicit variable names, but still interpretable)
+                    any other model, it is a dataframe with at least the names of the variables in the index, with as much summary statistical info as possible
                     if the model doesn't use external regressors, no key is added here
 
         Author Michael Keith: mikekeith52@gmail.com
     """
     def __init__(self,name=None,y=None,current_dates=None,future_dates=None,current_xreg=None,future_xreg=None,forecast_out_periods=24,**kwargs):
         """ You can load the object with data using __init__ or you can leave all default arguments and load the data with an attached API method (such as get_data_fred())
+            Keep the object types consistent (do not use tuples or numpy arrays instead of lists, for example)
             Parameters: name : str
                         y : list
                         current_dates : list
                             an ordered list of dates that correspond to the ordered values in self.y
-                            dates must be a pandas datetime object (pd.to_datetime())
+                            elements must be able to be parsed by pandas as dates
                         future_dates : list
                             an ordered list of dates that correspond to the future periods being forecasted
-                            dates must be a pandas datetime object (pd.to_datetime())
+                            elements must be able to be parsed by pandas as dates
                         current_xreg : dict
                         future_xreg : dict
                         forecast_out_periods : int, default length of future_dates or 24 if that is None
-                        **all keyword arguments become attributes
+                        all keyword arguments become attributes
         """
         self.name = name
         self.y = y
@@ -79,7 +80,7 @@ class Forecaster:
         self.future_dates = future_dates
         self.current_xreg = current_xreg
         self.future_xreg = future_xreg
-        self.forecast_out_periods=forecast_out_periods if future_dates is None else len(future_dates)
+        self.forecast_out_periods = forecast_out_periods if future_dates is None else len(future_dates)
         self.info = {}
         self.mape = {}
         self.forecasts = {}
@@ -91,10 +92,9 @@ class Forecaster:
             setattr(self,key,value)
 
     def _score_and_forecast(self,call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars):
-        """ scores a model on a test test
+        """ scores a model on a test test (sklearn models specific)
             forecasts out however many periods in the new data
             writes info to self.info, self.mape, and self.forecasts (this process is described in more detail in the forecast methods)
-            only works within an sklearn forecast method
             Parameters: call_me : str
                         regr : sklearn.<regression_model>
                         X : pd.core.frame.DataFrame
@@ -126,11 +126,10 @@ class Forecaster:
         self.info[call_me]['model_form'] = model_form
 
     def _train_test_split(self,test_length,Xvars='all'):
-        """ returns an X/y full set, training set, and testing set
-            resulting y objects are pd.Series
-            resulting X objects are pd.core.frame.DataFrame
+        """ returns an X/y full set, training set, and testing set (sklearn models specific)
+            resulting y objects are pandas series
+            resulting X objects are pandas dataframe
             this is a non-random split and the resulting test set will be size specified in test_length
-            only works within an sklearn forecast method
             Parameters: test_length : int,
                             the length of the resulting test_set
                         Xvars : list or "all", default "all"
@@ -147,8 +146,8 @@ class Forecaster:
     def _set_feature_importance(self,X,y,regr):
         """ returns the permutation feature importances of any regression model in a pandas dataframe
             leverages eli5 package (https://pypi.org/project/eli5/)
-            only works within an sklearn forecast method
-            Parameters: X : pandas dataFrame
+            sklearn models specific
+            Parameters: X : pandas dataframe
                             X regressors used to predict the depdendent variable
                         y : pandas series
                             y series representing the known values of the dependent variable
@@ -164,7 +163,7 @@ class Forecaster:
     def _prepr(self,*libs,test_length,call_me,Xvars):
         """ prepares the R environment by importing/installing libraries and writing out csv files (current/future datasets) to tmp folder
             file names: tmp_r_current.csv, tmp_r_future.csv
-            libs are libs to import and/or install from R
+            *libs are libs to import and/or install from R
             Parameters: call_me : str
                         Xvars : list, "all", or starts with "top_"
                         *libs: str
@@ -227,7 +226,7 @@ class Forecaster:
                 y is set as a list of numeric figures
                 current_dates is set as a list of datetime objects
                 future_dates is set as a list of datetime objects
-                if current_xreg is set, future_xreg is also set and both are dictionaries
+                if current_xreg is set, future_xreg is also set and both are dictionaries with lists as values
         """
         _no_error_ = 'before forecasting, the following issues need to be corrected:'
         error = _no_error_
@@ -312,7 +311,7 @@ class Forecaster:
             deals with columns with missing data
             eliminates rows that don't correspond with self.y's timeframe
             splits values between future and current observations
-            changes self.forecast_out_periods based on how many periods included in the dataframe pass self.current_dates
+            changes self.forecast_out_periods based on how many periods included in the dataframe past current_dates attribute
             assumes the dataframe is aggregated to the same timeframe as self.y (monthly, quarterly, etc.)
             for more complex processing, perform manipulations before passing through this function
             stores results in self.current_xreg, self.future_xreg, self.future_dates, and self.forecast_out_periods
@@ -384,7 +383,8 @@ class Forecaster:
         """ sets the self.forecast_out_periods attribute and truncates self.future_dates and self.future_xreg if needed
             Parameters: n : int
                 the number of periods you want to forecast out for
-                if this is a larger value than the size of self.future_dates, some models may fail
+                if this is a larger value than the size of the future_dates attribute, some models may fail
+                if this is a smaller value the the size of the future_dates attribute, future_xreg and future_dates will be truncated
         """
         if isinstance(n,int):
             if n >= 1:
@@ -467,166 +467,6 @@ class Forecaster:
         
         k = Counter(ext_reg) 
         self.ordered_xreg = [h[0] for h in k.most_common()] # this should give us the ranked external regressors
-
-    def forecast_nnetar(self,test_length=1,start='auto',interval=12,Xvars=None,P=1,boxcox=False,scale_inputs=True,repeats=20,negative_y='raise',call_me='nnetar'):
-        """ Neural Network Time Series Forecast
-            uses nnetar function from the forecast package in R
-            this forecast does not work when there are negative or 0 values in the dependent variable
-            Parameters: test_length : int, default 1
-                            the number of periods to holdout in order to test the model
-                            must be at least 1 (AssertionError raised if not)
-                        start : tuple of length 2 or "auto", default "auto"
-                            1st element is the start year
-                            2nd element is the start period in the appropriate interval
-                            for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)
-                            if "auto", assumes the dates in self.current_dates are monthly in yyyy-mm-01 format and will use the first element in the list 
-                        interval : float, default 12
-                            the number of periods in one season (365.25 for annual, 12 for monthly, etc.)
-                        Xvars : list, "all", None, or starts with "top_", default None
-                            the independent variables used to make predictions
-                            if it is a list, will attempt to estimate a model with that list of Xvars
-                            if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
-                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
-                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
-                            if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation
-                            because the function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option
-                            if no model can be estimated, will raise an error
-                        P : int, default 1
-                            the number of seasonal lags to add to the model
-                        boxcox : bool, default False
-                            whether to use a boxcox transformation on y
-                        scale_inputs : bool, default True
-                            whether to scale the inputs, performed after the boxcox transformation if that is set to True
-                        repeats : int, default 20
-                            the number of models to average with different starting points
-                        negative_y : one of {'raise','skip'}, default 'raise'
-                            what to do if negative or 0 values are observed in the y attribute
-                            'raise' will raise a ValueError
-                            'skip' will not attempt to evaluate a model without raising an error
-                        call_me : str, default "auto_arima"
-                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-        """
-        self._ready_for_forecast()
-
-        if min(self.y) <= 0:
-            if negative_y == 'raise':
-                raise ValueError('cannot estimate nnetar model, negative or 0 values observed in the y attribute')
-            elif negative_y == 'skip':
-                return None
-            else:
-                raise ValueError(f'argument in negative_y not recognized: {negative_y}')
-
-        if start == 'auto':
-            try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
-            except: raise ValueError('could not set start automatically, try passing argument manually')
-
-        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
-        assert test_length >= 1, 'test_length must be at least 1'
-        assert isinstance(repeats,int), f'repeats must be an int, not {type(repeats)}'
-
-        if isinstance(boxcox,bool):
-            bc = str(boxcox)[0]
-        else:
-            raise ValueError(f'argument passed to boxcox not recognized: {boxcox}')
-
-        if isinstance(scale_inputs,bool):
-            si = str(scale_inputs)[0]
-        else:
-            raise ValueError(f'argument passed to scale_inputs not recognized: {scale_inputs}')
-
-        try:
-            float(interval)
-        except ValueError:
-            raise ValueError(f'interval must be numeric type, got {type(interval)}')
-
-        self.info[call_me] = self._get_info_dict()
-        self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=Xvars)
-
-        ro.r(f"""
-            rm(list=ls())
-            setwd('{rwd}')
-            start_p <- c{start}
-            interval <- {interval}
-            test_length <- {test_length}
-            P <- {P}
-            boxcox <- {bc}
-            scale_inputs <- {si}
-            repeats <- {repeats}
-            
-            data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
-            
-            y <- ts(data$y,start=start_p,deltat=1/interval)
-            y_train <- subset(y,start=1,end=nrow(data)-test_length)
-            y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
-            
-            """)
-
-        ro.r("""
-            if (ncol(data) > 1){
-              future_externals = data.frame(read.csv('tmp/tmp_r_future.csv'))
-              externals <- names(data)[2:ncol(data)]
-              data_c <- data[,externals, drop=FALSE]
-              data_f <- future_externals[,externals, drop=FALSE]
-              all_externals_ts <- ts(rbind(data_c,data_f),start=start_p,deltat=1/interval)
-              xreg_c <- subset(all_externals_ts,start=1,end=nrow(data))
-              xreg_tr <- subset(all_externals_ts,start=1,end=nrow(data)-test_length)
-              xreg_te <- subset(all_externals_ts,start=nrow(data)-test_length+1,end=nrow(data))
-              if (test_length == 1){
-                xreg_te <- t(xreg_te)
-              }
-              xreg_f <- subset(all_externals_ts,start=nrow(data)+1)
-            } else {
-              xreg_c <- NULL
-              xreg_tr <- NULL
-              xreg_te <- NULL
-              xreg_f <- NULL
-            }
-            ar <- nnetar(y_train,xreg=xreg_tr,lambda=boxcox,scale.inputs=scale_inputs,repeats=repeats,P=P)
-            f <- forecast(ar,xreg=xreg_te,h=length(y_test))
-            p <- f$mean
-            nn_form <- f$method
-            if (test_length==1){
-              write <- data.frame(actual=y_test[1],
-                                forecast=p[1])
-            } else {
-              write <- data.frame(actual=y_test,
-                                forecast=p)            
-            }
-
-            write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
-            write$model_form <- nn_form
-            write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
-        """)
-        
-        ro.r(f"""
-            ar <- nnetar(y,xreg=xreg_c,lambda=boxcox,scale.inputs=scale_inputs,repeats=repeats,P=P)
-            f <- forecast(ar,xreg=xreg_f,h={self.forecast_out_periods})
-            p <- f$mean
-            nn_form <- f$method
-            
-            write <- data.frame(forecast=p)
-            write$model_form <- nn_form
-            write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
-
-            write <- data.frame(fitted = fitted(ar))
-            write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
-        """)
-        
-
-        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
-        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
-        tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
-
-        self.mape[call_me] = tmp_test_results['APE'].mean()
-        self.forecasts[call_me] = list(tmp_forecast['forecast'])
-        
-        self.info[call_me]['holdout_periods'] = test_length
-        self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
-        self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
-        self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
-        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
-        self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
-        self.feature_importance[call_me] = pd.DataFrame(index=pd.read_csv('tmp/tmp_r_current.csv').iloc[:,1:].columns.to_list())
 
     def forecast_auto_arima(self,test_length=1,Xvars=None,call_me='auto_arima'):
         """ Auto-Regressive Integrated Moving Average 
@@ -1195,6 +1035,166 @@ class Forecaster:
         self.info[call_me]['fitted_values'] = list(hwes.fittedvalues)
         self.forecasts[call_me] = list(hwes.predict(start=len(y),end=len(y) + self.forecast_out_periods-1))
         self._sm_summary_to_fi(hwes,call_me)
+
+    def forecast_nnetar(self,test_length=1,start='auto',interval=12,Xvars=None,P=1,boxcox=False,scale_inputs=True,repeats=20,negative_y='raise',call_me='nnetar'):
+        """ Neural Network Time Series Forecast
+            uses nnetar function from the forecast package in R
+            this forecast does not work when there are negative or 0 values in the dependent variable
+            Parameters: test_length : int, default 1
+                            the number of periods to holdout in order to test the model
+                            must be at least 1 (AssertionError raised if not)
+                        start : tuple of length 2 or "auto", default "auto"
+                            1st element is the start year
+                            2nd element is the start period in the appropriate interval
+                            for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)
+                            if "auto", assumes the dates in self.current_dates are monthly in yyyy-mm-01 format and will use the first element in the list 
+                        interval : float, default 12
+                            the number of periods in one season (365.25 for annual, 12 for monthly, etc.)
+                        Xvars : list, "all", None, or starts with "top_", default None
+                            the independent variables used to make predictions
+                            if it is a list, will attempt to estimate a model with that list of Xvars
+                            if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
+                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
+                            if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation
+                            because the function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option
+                            if no model can be estimated, will raise an error
+                        P : int, default 1
+                            the number of seasonal lags to add to the model
+                        boxcox : bool, default False
+                            whether to use a boxcox transformation on y
+                        scale_inputs : bool, default True
+                            whether to scale the inputs, performed after the boxcox transformation if that is set to True
+                        repeats : int, default 20
+                            the number of models to average with different starting points
+                        negative_y : one of {'raise','skip'}, default 'raise'
+                            what to do if negative or 0 values are observed in the y attribute
+                            'raise' will raise a ValueError
+                            'skip' will not attempt to evaluate a model without raising an error
+                        call_me : str, default "auto_arima"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+        """
+        self._ready_for_forecast()
+
+        if min(self.y) <= 0:
+            if negative_y == 'raise':
+                raise ValueError('cannot estimate nnetar model, negative or 0 values observed in the y attribute')
+            elif negative_y == 'skip':
+                return None
+            else:
+                raise ValueError(f'argument in negative_y not recognized: {negative_y}')
+
+        if start == 'auto':
+            try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
+            except: raise ValueError('could not set start automatically, try passing argument manually')
+
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        assert isinstance(repeats,int), f'repeats must be an int, not {type(repeats)}'
+
+        if isinstance(boxcox,bool):
+            bc = str(boxcox)[0]
+        else:
+            raise ValueError(f'argument passed to boxcox not recognized: {boxcox}')
+
+        if isinstance(scale_inputs,bool):
+            si = str(scale_inputs)[0]
+        else:
+            raise ValueError(f'argument passed to scale_inputs not recognized: {scale_inputs}')
+
+        try:
+            float(interval)
+        except ValueError:
+            raise ValueError(f'interval must be numeric type, got {type(interval)}')
+
+        self.info[call_me] = self._get_info_dict()
+        self._prepr('forecast',test_length=test_length,call_me=call_me,Xvars=Xvars)
+
+        ro.r(f"""
+            rm(list=ls())
+            set.seed(20)
+            setwd('{rwd}')
+            start_p <- c{start}
+            interval <- {interval}
+            test_length <- {test_length}
+            P <- {P}
+            boxcox <- {bc}
+            scale_inputs <- {si}
+            repeats <- {repeats}
+            h <- {self.forecast_out_periods}
+            
+            data <- data.frame(read.csv('tmp/tmp_r_current.csv'))
+            
+            y <- ts(data$y,start=start_p,deltat=1/interval)
+            y_train <- subset(y,start=1,end=nrow(data)-test_length)
+            y_test <- subset(y,start=nrow(data)-test_length+1,end=nrow(data))
+            
+            """)
+
+        ro.r("""
+            if (ncol(data) > 1){
+              future_externals = data.frame(read.csv('tmp/tmp_r_future.csv'))
+              externals <- names(data)[2:ncol(data)]
+              data_c <- data[,externals, drop=FALSE]
+              data_f <- future_externals[,externals, drop=FALSE]
+              all_externals_ts <- ts(rbind(data_c,data_f),start=start_p,deltat=1/interval)
+              xreg_c <- subset(all_externals_ts,start=1,end=nrow(data))
+              xreg_tr <- subset(all_externals_ts,start=1,end=nrow(data)-test_length)
+              xreg_te <- subset(all_externals_ts,start=nrow(data)-test_length+1,end=nrow(data))
+              if (test_length == 1){
+                xreg_te <- t(xreg_te)
+              }
+              xreg_f <- subset(all_externals_ts,start=nrow(data)+1)
+            } else {
+              xreg_c <- NULL
+              xreg_tr <- NULL
+              xreg_te <- NULL
+              xreg_f <- NULL
+            }
+            ar <- nnetar(y_train,xreg=xreg_tr,lambda=boxcox,scale.inputs=scale_inputs,repeats=repeats,P=P)
+            f <- forecast(ar,xreg=xreg_te,h=length(y_test))
+            p <- f$mean
+            nn_form <- f$method
+            if (test_length==1){
+              write <- data.frame(actual=y_test[1],
+                                forecast=p[1])
+            } else {
+              write <- data.frame(actual=y_test,
+                                forecast=p)            
+            }
+
+            write$APE <- abs(write$actual - write$forecast) / abs(write$actual)
+            write$model_form <- nn_form
+            write.csv(write,'tmp/tmp_test_results.csv',row.names=F)
+
+            ar <- nnetar(y,xreg=xreg_c,lambda=boxcox,scale.inputs=scale_inputs,repeats=repeats,P=P)
+            f <- forecast(ar,xreg=xreg_f,h=h)
+            p <- f$mean
+            nn_form <- f$method
+            
+            write <- data.frame(forecast=p)
+            write$model_form <- nn_form
+            write.csv(write,'tmp/tmp_forecast.csv',row.names=F)
+
+            write <- data.frame(fitted = fitted(ar))
+            write.csv(write,'tmp/tmp_fitted.csv',row.names=F)
+        """)
+        
+
+        tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+        tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+        tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
+
+        self.mape[call_me] = tmp_test_results['APE'].mean()
+        self.forecasts[call_me] = list(tmp_forecast['forecast'])
+        
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
+        self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
+        self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
+        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
+        self.feature_importance[call_me] = pd.DataFrame(index=pd.read_csv('tmp/tmp_r_current.csv').iloc[:,1:].columns.to_list())
 
     def forecast_tbats(self,test_length=1,season='NULL',call_me='tbats'):
         """ Exponential Smoothing State Space Model With Box-Cox Transformation, ARMA Errors, Trend And Seasonal Component
