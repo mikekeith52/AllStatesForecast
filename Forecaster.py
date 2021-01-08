@@ -36,7 +36,7 @@ class Forecaster:
             svr (support vector regressor - sklearn)
             tbats (exponential smoothing state space model With box-cox transformation, arma errors, trend, and seasonal component - R forecast::tbats)
             time series neural network (R forecast::nnetar)
-            var (vector auto regression - R vars::VAR)      
+            var (vector auto regression - R vars::VAR)
             vecm (vector error correction model - R tsDyn::VECM)
         more models can be added by building more methods
 
@@ -354,6 +354,7 @@ class Forecaster:
         def _backward_fill_(c): xreg_df[c].fillna(method='bfill',inplace=True)
         def _impute_random_(c): xreg_df.loc[xreg_df[c].isnull(),c] = xreg_df[c].dropna().sample(xreg_df.loc[xreg_df[c].isnull()].shape[0]).to_list()
 
+        assert xreg_df.shape[0] == len(xreg_df[date_col].unique()), 'each date supplied must be unique'
         xreg_df[date_col] = pd.to_datetime(xreg_df[date_col])
         self.future_dates = xreg_df.loc[xreg_df[date_col] > list(self.current_dates)[-1],date_col].to_list()
         xreg_df = xreg_df.loc[xreg_df[date_col] >= self.current_dates[0]]
@@ -378,18 +379,34 @@ class Forecaster:
         self.forecast_out_periods = future_xreg_df.shape[0]
         self.current_xreg = current_xreg_df.to_dict(orient='list')
         self.future_xreg = future_xreg_df.to_dict(orient='list')
+
+    def generate_future_dates(self,n,freq):
+        """ generates future dates and stores in the future_dates attribute
+            changes forecast_out_periods attribute appropriately
+            Parameters: n : int
+                            the number of periods to forecast
+                            the length of the resulting future_dates attribute
+                        freq : str
+                            a pandas datetime freq value
+                            https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
+        """
+        self.future_dates = pd.date_range(start=self.current_dates[-1],periods=n+1,freq=freq).to_list()[1:]
+        self.forecast_out_periods = n
         
     def set_forecast_out_periods(self,n):
         """ sets the self.forecast_out_periods attribute and truncates self.future_dates and self.future_xreg if needed
             Parameters: n : int
-                the number of periods you want to forecast out for
-                if this is a larger value than the size of the future_dates attribute, some models may fail
-                if this is a smaller value the the size of the future_dates attribute, future_xreg and future_dates will be truncated
+                            the number of periods you want to forecast out for
+                            if this is a larger value than the size of the future_dates attribute, some models may fail
+                            if this is a smaller value the the size of the future_dates attribute, future_xreg and future_dates will be truncated
         """
         if isinstance(n,int):
             if n >= 1:
                 self.forecast_out_periods = n
-                self.future_dates = self.future_dates[:n]
+                if self.future_dates is None:
+                    raise ForecastFormatError('cannot set forecast_out_periods without a populated future_dates attribute, try using the generate_future_dates() method')
+                else:
+                    self.future_dates = self.future_dates[:n]
                 if isinstance(self.future_xreg,dict):
                     for k,v in self.future_xreg.items():
                         self.future_xreg[k] = v[:n]
@@ -1195,6 +1212,8 @@ class Forecaster:
         self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
         self.feature_importance[call_me] = pd.DataFrame(index=pd.read_csv('tmp/tmp_r_current.csv').iloc[:,1:].columns.to_list())
+        if self.feature_importance[call_me].shape[0] == 0:
+            self.feature_importance.pop(call_me)
 
     def forecast_tbats(self,test_length=1,season='NULL',call_me='tbats'):
         """ Exponential Smoothing State Space Model With Box-Cox Transformation, ARMA Errors, Trend And Seasonal Component
