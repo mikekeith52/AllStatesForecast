@@ -9,10 +9,6 @@ import rpy2.robjects as ro
 # make the working directory friendly for R
 rwd = os.getcwd().replace('\\','/')
 
-# add a descriptive error
-class ForecastFormatError(Exception):
-    pass
-
 class Forecaster:
     """ object to forecast time series data
         natively supports the extraction of FRED data, could be expanded to other APIs with few adjustments
@@ -228,6 +224,10 @@ class Forecaster:
                 future_dates is set as a list of datetime objects
                 if current_xreg is set, future_xreg is also set and both are dictionaries with lists as values
         """
+        # add a descriptive error
+        class ForecastFormatError(Exception):
+            pass
+            
         _no_error_ = 'before forecasting, the following issues need to be corrected:'
         error = _no_error_
         if isinstance(self.y,list):
@@ -2109,7 +2109,7 @@ class Forecaster:
         x = [h[0] for h in Counter(self.mape).most_common()]
         return x[::-1] # reversed copy of the list
 
-    def pop_forecast(self,which):
+    def pop(self,which):
         """ deletes a forecast or list of forecasts from the object
             Parameters: which : str or list-like
                 if str, that model will be popped
