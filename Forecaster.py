@@ -26,7 +26,6 @@ class Forecaster:
             lasso (sklearn)
             mlp (multi level perceptron - sklearn)
             mlr (multi linear regression - sklearn)
-            naive (propagates final observed value forward)
             rf (random forest - sklearn)
             ridge (sklearn)
             svr (support vector regressor - sklearn)
@@ -746,7 +745,8 @@ class Forecaster:
             The function here is simplified, but the power in X13 is its database offers precise ways to model seasonality, also takes into account outliers
             Documentation: https://cran.r-project.org/web/packages/seasonal/seasonal.pdf, http://www.seasonal.website/examples.html
             This package only allows for monthly or less granular observations, and only three years or fewer of predictions
-            when a series does not have a lot of seasonality, sometimes the model fails, also when it tries to add the same outlier in two different ways
+            the model will fail if there are 0 or negative values in the dependent variable attempted to be predicted
+            the model can fail for several other reasons (including lack of seasonality in the dependent variable)
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -774,9 +774,22 @@ class Forecaster:
                             if unable to estimate the model, "pass" will silently skip the model and delete all associated attribute keys (self.info)
                             if unable to estimate the model, "print" will skip the model, delete all associated attribute keys (self.info), and print the error
                             errors are common even if you specify everything correctly -- it has to do with the X13 estimator itself
+                            one common error is caused when negative or 0 values are present in the dependent variables
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         self._ready_for_forecast()
+
+        if min(self.y) <= 0:
+            if error == 'raise':
+                raise ValueError('cannot estimate nnetar model, negative or 0 values observed in the y attribute')
+            elif error == 'pass':
+                return None
+            elif error == 'print':
+                print('cannot estimate nnetar model, negative or 0 values observed in the y attribute')
+                return None
+            else:
+                raise ValueError(f'argument in error not recognized: {error}')
+
         if start == 'auto':
             try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
             except: raise ValueError('could not set start automatically, try passing argument manually')
@@ -934,6 +947,7 @@ class Forecaster:
             https://towardsdatascience.com/holt-winters-exponential-smoothing-d703072c0572
             The Holt-Winters ES modifies the Holt ES technique so that it can be used in the presence of both trend and seasonality.
             for a more automated holt-winters application, see forecast_auto_hwes()
+            if no keywords are added, this is almost always the same as a naive forecast that propogates the final value forward
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
@@ -1084,10 +1098,11 @@ class Forecaster:
                             whether to scale the inputs, performed after the boxcox transformation if that is set to True
                         repeats : int, default 20
                             the number of models to average with different starting points
-                        negative_y : one of {'raise','skip'}, default 'raise'
+                        negative_y : one of {'raise','pass','print'}, default 'raise'
                             what to do if negative or 0 values are observed in the y attribute
                             'raise' will raise a ValueError
-                            'skip' will not attempt to evaluate a model without raising an error
+                            'pass' will not attempt to evaluate a model without raising an error
+                            'print' will not evaluate the model but print the error
                         call_me : str, default "auto_arima"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
@@ -1096,7 +1111,10 @@ class Forecaster:
         if min(self.y) <= 0:
             if negative_y == 'raise':
                 raise ValueError('cannot estimate nnetar model, negative or 0 values observed in the y attribute')
+            elif negative_y == 'pass':
+                return None
             elif negative_y == 'skip':
+                print('cannot estimate nnetar model, negative or 0 values observed in the y attribute')
                 return None
             else:
                 raise ValueError(f'argument in negative_y not recognized: {negative_y}')
@@ -2041,7 +2059,7 @@ class Forecaster:
 
         if not exclude is None:
             if not isinstance(exclude,list):
-                raise TypeError(f'exclude must be a list or None, not {type(exclude)}')
+                raise TypeError(f'exclude must be a list type or None, not {type(exclude)} type')
             else:
                 avg_these_models = [m for m in avg_these_models if m not in exclude]
             
@@ -2079,22 +2097,6 @@ class Forecaster:
         self.info[call_me]['test_set_ape'] = list(test_set_ape_df.mean(axis=1))
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
         self.forecasts[call_me] = list(forecasts.mean(axis=1))
-
-    def forecast_naive(self,call_me='naive',mape=1.0):
-        """ forecasts with a naive method of using the last observed y value propagated forward
-            Parameters: call_me : str, default "naive"
-                            what to call the evaluated model -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-                        mape : float, default 1.0
-                            the MAPE to assign to the model -- since the model is not tested, this should be some arbitrarily high number
-            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
-        """
-        self.mape[call_me] = float(mape)
-        self.info[call_me] = self._get_info_dict()
-        self.forecasts[call_me] = [self.y[-1]]*self.forecast_out_periods
-        self.info[call_me]['model_form'] = 'Naive'
-        self.info[call_me]['test_set_actuals'] = [None]
-        self.info[call_me]['test_set_predictions'] = [None]
-        self.info[call_me]['test_set_ape'] = [None]
 
     def set_best_model(self):
         """ sets the best forecast model based on which model has the lowest MAPE value for the given holdout periods
