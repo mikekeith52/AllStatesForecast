@@ -283,11 +283,13 @@ class Forecaster:
         if len(error) > len(_no_error_):
             raise ForecastFormatError(error)
 
-    def get_data_fred(self,series,date_start='1900-01-01'):
+    def get_data_fred(self,series,i=0,date_start='1900-01-01'):
         """ imports data from FRED into a pandas dataframe
             stores the results in self.name, self.y, and self.current_dates
             Parameters: series : str
                             the name of the series to extract from FRED
+                        i : int
+                            the number of differences to take in the series to make it stationary
                         date_start : str
                             the date to begin the time series
                             must be in YYYY-mm-dd format
@@ -301,6 +303,10 @@ class Forecaster:
         """
         self.name = series
         df = pdr.get_data_fred(series,start=date_start)
+        if i > 0:
+            for d in range(1,i+1):
+                df[series] = df[series].diff(1)
+        df.dropna(inplace=True)
         self.y = df[series].to_list()
         self.current_dates = df.index.to_list()
 
@@ -2206,7 +2212,7 @@ class Forecaster:
 
     def export_to_df(self,which='top_1',save_csv=False,csv_name='forecast_results.csv'):
         """ exports a forecast or forecasts to a pandas dataframe with future dates as the index and each exported forecast as a column
-        	returns a pandas dataframe
+            returns a pandas dataframe
             will fail if you attempt to export forecasts of varying lengths
             by default, exports the best evaluated model by MAPE
             Parameters: which : starts with "top_", "all", or list; default "top_1"
