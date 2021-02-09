@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import datetime
 import os
 import pandas_datareader as pdr
 from collections import Counter
@@ -2104,6 +2105,41 @@ class Forecaster:
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
         self.forecasts[call_me] = list(forecasts.mean(axis=1))
 
+    def forecast_splice(self,models,periods,force_mape=None,call_me='splice'):
+        """ splices multiple forecasts together
+            this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
+            Parameters: models : list
+                        periods : tuple of datetime objects
+                            must be one less in length than models
+                            each date represents a splice
+                                model[0] --> :periods[0]
+                                models[-1] --> periods[-1]:
+                        force_mape : float, default None
+                            since some class methods will fail if mape isn't numeric, you can force a numeric mape value here
+                        call_me : str
+                            the model nickname
+            >>> f.forecast_splice(models=['arima','tbats'],periods=(datetime.datetime(2020,1,1),))
+        """
+        assert isinstance(models,list), 'models must be a list'
+        assert len(models) >= 2, 'need at least two models passed to models'
+        assert np.array([m in self.forecasts.keys() for m in models]).all(), 'all models must have been evaluated already'
+        assert isinstance(periods,tuple), 'periods must be a tuple'
+        assert len(models) == len(periods) + 1, 'models must be exactly 1 greater in length than periods'
+        assert np.array([p in self.future_dates for p in periods]).all(), 'all elements in periods must be datetime objects in future_dates'
+
+        self.info[call_me] = self._get_info_dict()
+        self.info[call_me]['model_form'] = "Splice of {}; splice points: {}".format(', '.join([v['model_form'] for k,v in self.info.items() if k in models]), ', '.join([v.strftime('%Y-%m-%d') for v in periods]))
+        self.mape[call_me] = force_mape if force_mape is None else float(force_mape)
+        self.forecasts[call_me] = [None]*self.forecast_out_periods
+        
+        # splice
+        start = 0
+        for i in range(len(periods)):
+            end = [idx for idx,v in enumerate(self.future_dates) if v == periods[i]][0]
+            self.forecasts[call_me][start:end] = self.forecasts[models[i]][start:end]
+            start = end
+        self.forecasts[call_me][start:] = self.forecasts[models[-1]][start:]
+
     def set_best_model(self):
         """ sets the best forecast model based on which model has the lowest MAPE value for the given holdout periods
             if two or more models tie, it will select whichever one was evaluated first
@@ -2148,7 +2184,10 @@ class Forecaster:
                 if m in self.feature_importance.keys():
                     self.feature_importance.pop(m)
 
-    def display_ts_plot(self,models='all',plot_fitted=False,print_model_form=False,print_mapes=False):
+    def display_ts_plot(self,**kwargs):
+        self.plot(**kwargs)
+
+    def plot(self,models='all',plot_fitted=False,print_model_form=False,print_mapes=False):
         """ Plots time series results of the stored forecasts
             All models plotted in order of best-to-worst mapes
             Parameters: models : list, "all", or starts with "top_"; default "all"
