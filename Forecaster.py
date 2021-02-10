@@ -1375,7 +1375,7 @@ class Forecaster:
                             each list must be the same size as self.y if auto_resize is False
                             be sure to exclude NAs
                         auto_resize : bool, default False
-                            if True, if series in *series are different size than self.y, all series will be truncated to match the shortest series
+                            if True, if series in series are different size than self.y, all series will be truncated to match the shortest series
                             if True, note that the forecast will not necessarily make predictions based on the entire history available in y
                             using this assumes that the shortest series ends at the same time the others do and there are no periods missing
                         test_length : int, default 1
@@ -1588,7 +1588,7 @@ class Forecaster:
                             if more than 1 list, there must be at least 1 cointegrated pair between cids* and self.y (to fulfill the requirements of VECM)
                             be sure to exclude NAs
                         auto_resize : bool, default False
-                            if True, if series in *series are different size than self.y, all series will be truncated to match the shortest series
+                            if True, if series in cids are different size than self.y, all series will be truncated to match the shortest series
                             if True, note that the forecast will not necessarily make predictions based on the entire history available in y
                             using this assumes that the shortest series ends at the same time the others do and there are no periods missing
                         test_length : int, default 1
@@ -1603,7 +1603,7 @@ class Forecaster:
                             if it is "all", will attempt to estimate a model with all available x regressors
                             because the VECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option
                         r : int, default 1
-                            the number of total cointegrated relationships between self.y and *cids
+                            the number of total cointegrated relationships between self.y and cids
                             if not an int or less than 1, an AssertionError is raised
                         max_lags : int, default 6
                             the total number of lags that will be used in the optimization process
@@ -2128,7 +2128,7 @@ class Forecaster:
         assert np.array([p in self.future_dates for p in periods]).all(), 'all elements in periods must be datetime objects in future_dates'
 
         self.info[call_me] = self._get_info_dict()
-        self.info[call_me]['model_form'] = "Splice of {}; splice points: {}".format(', '.join([v['model_form'] for k,v in self.info.items() if k in models]), ', '.join([v.strftime('%Y-%m-%d') for v in periods]))
+        self.info[call_me]['model_form'] = "Splice of {}; splice point(s): {}".format(', '.join([k for k in self.info if k in models]), ', '.join([v.strftime('%Y-%m-%d') for v in periods]))
         self.mape[call_me] = force_mape if force_mape is None else float(force_mape)
         self.forecasts[call_me] = [None]*self.forecast_out_periods
         
