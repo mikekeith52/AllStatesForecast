@@ -305,8 +305,7 @@ class Forecaster:
         self.name = series
         df = pdr.get_data_fred(series,start=date_start)
         if i > 0:
-            for d in range(1,i+1):
-                df[series] = df[series].diff(1)
+            df[series] = df[series].diff(i)
         df.dropna(inplace=True)
         self.y = df[series].to_list()
         self.current_dates = df.index.to_list()
