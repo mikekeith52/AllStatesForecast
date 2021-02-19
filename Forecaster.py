@@ -10,6 +10,10 @@ import rpy2.robjects as ro
 # make the working directory friendly for R
 rwd = os.getcwd().replace('\\','/')
 
+# add a descriptive error
+class ForecastFormatError(Exception):
+    pass
+
 class Forecaster:
     """ object to forecast time series data
         natively supports the extraction of FRED data, could be expanded to other APIs with few adjustments
@@ -31,7 +35,7 @@ class Forecaster:
             ridge (sklearn)
             svr (support vector regressor - sklearn)
             tbats (exponential smoothing state space model With box-cox transformation, arma errors, trend, and seasonal component - R forecast::tbats)
-            time series neural network (R forecast::nnetar)
+            nnetar (time series neural network - R forecast::nnetar)
             var (vector auto regression - R vars::VAR)
             vecm (vector error correction model - R tsDyn::VECM)
         more models can be added by building more methods
@@ -223,11 +227,7 @@ class Forecaster:
                 current_dates is set as a list of datetime objects
                 future_dates is set as a list of datetime objects
                 if current_xreg is set, future_xreg is also set and both are dictionaries with lists as values
-        """
-        # add a descriptive error
-        class ForecastFormatError(Exception):
-            pass
-            
+        """  
         _no_error_ = 'before forecasting, the following issues need to be corrected:'
         error = _no_error_
         if isinstance(self.y,list):
