@@ -294,13 +294,13 @@ class Forecaster:
                         date_start : str
                             the date to begin the time series
                             must be in YYYY-mm-dd format
-            >>> f = Forecaster()
-            >>> f.get_data_fred('UTUR')
-            >>> print(f.y)
-            [5.8, 5.8, ..., 5.0, 4.1]
+            f = Forecaster()
+            f.get_data_fred('UTUR')
+            print(f.y)
+            >>> [5.8, 5.8, ..., 5.0, 4.1]
 
-            >>> print(f.current_dates)
-            [Timestamp('1976-01-01 00:00:00'), Timestamp('1976-02-01 00:00:00'), ..., Timestamp('2020-09-01 00:00:00'), Timestamp('2020-10-01 00:00:00')]
+            print(f.current_dates)
+            >>> [Timestamp('1976-01-01 00:00:00'), Timestamp('1976-02-01 00:00:00'), ..., Timestamp('2020-09-01 00:00:00'), Timestamp('2020-10-01 00:00:00')]
         """
         self.name = series
         df = pdr.get_data_fred(series,start=date_start)
@@ -332,20 +332,20 @@ class Forecaster:
                             if dict, key is a column and value is one of supported, method only applied to columns with missing data                  
                             'impute_random' will fill in missing values with random draws from the same column
            
-            >>> xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
-            >>> f = Forecaster(y=[4,5,9],current_dates=['2020-01-01','2020-02-01','2020-03-01'])
-            >>> f.process_xreg_df(xreg_df,date_col='date')
-            >>> print(f.current_xreg)
-            {'x1':[1,2,3],'x2':[1,3,3]}
+            xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
+            f = Forecaster(y=[4,5,9],current_dates=['2020-01-01','2020-02-01','2020-03-01'])
+            f.process_xreg_df(xreg_df,date_col='date')
+            print(f.current_xreg)
+            >>> {'x1':[1,2,3],'x2':[1,3,3]}
 
-            >>> print(f.future_xreg)
-            {'x1':[5],'x2':[3]}
+            print(f.future_xreg)
+            >>> {'x1':[5],'x2':[3]}
 
-            >>> print(f.future_dates)
-            [Timestamp('2020-04-01 00:00:00')]
+            print(f.future_dates)
+            >>> [Timestamp('2020-04-01 00:00:00')]
 
-            >>> print(f.forecast_out_periods)
-            1
+            print(f.forecast_out_periods)
+            >>> 1
         """
         # for other processing methods, add a function here that follows the same pattern and it should flow down automatically
         def _remove_(c): xreg_df.drop(columns=c,inplace=True)
@@ -509,27 +509,27 @@ class Forecaster:
                             if no arima model can be estimated, will raise an error
                         call_me : str, default "auto_arima"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-            >>> f = Forecaster()
-            >>> f.get_data_fred('UTUR')
-            >>> f.forecast_auto_arima(test_length=12,call_me='arima')
-            >>> print(f.info['arima'])
-            {'holdout_periods': 12, 
-            'model_form': 'ARIMA(0,1,5)',
-            'test_set_actuals': [2.4, 2.4, ..., 5.0, 4.1],
-            'test_set_predictions': [2.36083282553252, 2.3119957980461803, ..., 2.09177057271149, 2.08127132827637], 
-            'test_set_ape': [0.0163196560281154, 0.03666841748076, ..., 0.581645885457702, 0.49237284676186205]}
-            >>> print(f.forecasts['arima'])
-            [4.000616524942799, 4.01916650578768, ..., 3.7576542462753904, 3.7576542462753904]
+            f = Forecaster()
+            f.get_data_fred('UTUR')
+            f.forecast_auto_arima(test_length=12,call_me='arima')
+            print(f.info['arima'])
+            >>> {'holdout_periods': 12, 
+            >>> 'model_form': 'ARIMA(0,1,5)',
+            >>> 'test_set_actuals': [2.4, 2.4, ..., 5.0, 4.1],
+            >>> 'test_set_predictions': [2.36083282553252, 2.3119957980461803, ..., 2.09177057271149, 2.08127132827637], 
+            >>> 'test_set_ape': [0.0163196560281154, 0.03666841748076, ..., 0.581645885457702, 0.49237284676186205]}
+            print(f.forecasts['arima'])
+            >>> [4.000616524942799, 4.01916650578768, ..., 3.7576542462753904, 3.7576542462753904]
             
-            >>> print(f.mape['arima'])
-            0.4082393522799069
-            >>> print(f.feature_importance['arima']) # stored as a pandas dataframe
-                coef        se    tvalue          pval
-            ma5  0.189706  0.045527  4.166858  3.598788e-05
-            ma4 -0.032062  0.043873 -0.730781  4.652316e-01
-            ma3 -0.060743  0.048104 -1.262753  2.072261e-01
-            ma2 -0.257684  0.044522 -5.787802  1.213441e-08
-            ma1  0.222933  0.042513  5.243861  2.265347e-07
+            print(f.mape['arima'])
+            >>> 0.4082393522799069
+            print(f.feature_importance['arima']) # stored as a pandas dataframe
+            >>>     coef        se    tvalue          pval
+            >>> ma5  0.189706  0.045527  4.166858  3.598788e-05
+            >>> ma4 -0.032062  0.043873 -0.730781  4.652316e-01
+            >>> ma3 -0.060743  0.048104 -1.262753  2.072261e-01
+            >>> ma2 -0.257684  0.044522 -5.787802  1.213441e-08
+            >>> ma1  0.222933  0.042513  5.243861  2.265347e-07
         """
         self._ready_for_forecast()
         assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
@@ -1109,7 +1109,7 @@ class Forecaster:
                             'raise' will raise a ValueError
                             'pass' will not attempt to evaluate a model without raising an error
                             'print' will not evaluate the model but print the error
-                        call_me : str, default "auto_arima"
+                        call_me : str, default "nnetar"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
         """
         self._ready_for_forecast()
@@ -1369,7 +1369,7 @@ class Forecaster:
             forecasts using VAR from the vars package in R
             Optimizes the final model with different time trends, constants, and x variables by minimizing the AIC or BIC in the training set
             Unfortunately, only supports a level forecast, so to avoid stationarity issues, perform your own transformations before loading the data
-            Parameters: *series : required
+            Parameters: series : required
                             lists of other series to run the VAR with
                             each list must be the same size as self.y if auto_resize is False
                             be sure to exclude NAs
@@ -1580,7 +1580,7 @@ class Forecaster:
         """ Vector Error Correction Model
             forecasts using VECM from the tsDyn package in R
             Optimizes the final model with different lags, time trends, constants, and x variables by minimizing the AIC or BIC in the training set
-            Parameters: *cids : required
+            Parameters: cids : required
                             lists of cointegrated data
                             each list must be the same size as self.y
                             if this is only 1 list, it must be cointegrated with self.y
