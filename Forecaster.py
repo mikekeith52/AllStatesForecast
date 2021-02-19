@@ -1030,10 +1030,10 @@ class Forecaster:
         y = pd.Series(self.y)
         y_train = y.values[:-test_length]
         y_test = y.values[-test_length:]
-        dates = pd.to_datetime(self.current_dates) if not self.current_dates is None else None
+        dates = pd.to_datetime(self.current_dates)
 
         scores = [] # lower is better
-        if min(self.y) > 0:
+        if y.min() > 0:
             grid = expand_grid({
                 'trend':[None,'add','mul'],
                 'seasonal':[None] if not seasonal else ['add','mul'],
