@@ -580,7 +580,8 @@ f.plot(models='top_1',print_mapes=True,plot_fitted=True)
 [Analysis 6](#analysis-6): using the same model with different parameters  
 [Analysis 7](#analysis-7): forecasting with a vecm  
 
-### Analysis 1: Forecasting statewide indicators, using automatic adjustments for stationarity
+### Analysis 1
+- Forecasting statewide indicators, using automatic adjustments for stationarity
 ```python
 from Forecaster import Forecaster
 
@@ -603,7 +604,8 @@ print(forecast.mape)
 print(forecast.info)
 forecast.plot()
 ```
-### Analysis 2: Forecasting statewide indicators, taking differences to account for stationarity
+### Analysis 2
+- Forecasting statewide indicators, taking differences to account for stationarity
 ```python
 from Forecaster import Forecaster
 
@@ -630,7 +632,8 @@ print(forecast.mape)
 print(forecast.info)
 forecast.plot()
 ```
-### Analysis 3: Forecasting statewide indicators, using a dataframe of external regressors
+### Analysis 3
+- Forecasting statewide indicators, using a dataframe of external regressors
 ```python
 from Forecaster import Forecaster
 df = pd.read_csv('path/to/external/regressors.csv')
@@ -657,14 +660,15 @@ print(forecast.info)
 forecast.plot()
 
 ```
-### Analysis 4: Forecasting different length series
+### Analysis 4
+- Forecasting different length series
 ```python
 from Forecaster import Forecaster
 
 df = pd.read_csv('path/to/df/with/time/series.csv',index_col=0) # each column is a series to forecast and the index is a datetime, daily data
 externals = pd.read_csv('path/to/externals.csv') # date should be a column, not index
 
-
+forecats = {}
 for c in df.columns:
   y_load = df[c].drop_na() # nas are present when a certain series doesn't have data starting at the index's beginning
   f = Forecaster(y=y_load.to_list(),current_dates=y_load.index.to_list(),name=c)
@@ -679,9 +683,11 @@ for c in df.columns:
     f.forecast_nnetar(test_length=test_length,Xreg=['x1','x2','x4'],P=0)
     f.forecast_arima(test_length=test_length,order=(1,1,1),Xreg='all',call_me='arima_all_reg')
   f.forecast_average(models='top_5')
+  forecasts[c] = f
 ```
 
-### Analysis 5: three ways to auto-forecast seasonality
+### Analysis 5
+- three ways to auto-forecast seasonality
 ```python
 from Forecaster import Forecaster
 def main():
@@ -715,7 +721,8 @@ if __name__ == '__main__':
   main()
 ```
 
-### Analysis 6: using the same model with different parameters
+### Analysis 6
+- using the same model with different parameters
 ```python
 from Forecaster import Forecaster
 
@@ -738,7 +745,8 @@ for c in df.columns:
   forecasts[c] = f
 ```
 
-### Analysis 7: forecasting with a vecm  
+### Analysis 7
+- forecasting with a vecm  
 ```python
 from Forecaster import Forecaster
 
