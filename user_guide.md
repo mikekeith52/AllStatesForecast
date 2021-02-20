@@ -8,6 +8,8 @@
 [Ingesting a DataFrame of External Regressors](#ingesting-a-dataframe-of-external-regressors)  
 [Forecasting](#forecasting)  
 [Plotting](#plotting)  
+[Export Results](#export-results)
+[Examples](#examples)
 
 ## Overview:
 - object to forecast time series data  
@@ -566,4 +568,201 @@ f.plot()
 f.plot(models=['arima','tbats'])
 f.plot(models='top_4')
 f.plot(models='top_1',print_mapes=True,plot_fitted=True)
+```
+
+## Examples
+
+[Analysis 1](#analysis-1): Forecasting statewide indicators, using automatic adjustments for stationarity  
+[Analysis 2](#analysis-2): Forecasting statewide indicators, taking differences to account for stationarity  
+[Analysis 3](#analysis-3): Forecasting statewide indicators, using a dataframe of external regressors  
+[Analysis 4](#analysis-4): Forecasting different length series  
+[Analysis 5](#analysis-5): three ways to auto-forecast seasonality  
+[Analysis 6](#analysis-6): using the same model with different parameters  
+[Analysis 7](#analysis-7): forecasting with a vecm  
+
+### Analysis 1: Forecasting statewide indicators, using automatic adjustments for stationarity
+```python
+from Forecaster import Forecaster
+
+state_forecasts = {}
+for state in states: # states is a list of state abbreviations
+  for ei in ('PHCI','UR','SLIND'):
+    f = Forecaster()
+    f.get_data_fred(state+ei)
+    f.generate_future_dates(12,'MS') # generate 12 monthly future dates to forecast 12 months to the future
+    f.forecast_auto_arima(test_length=12)
+    f.forecast_auto_hwes(test_length=12)
+    f.forecast_average()
+    state_forecasts[state+ei] = f
+
+# compare results
+state = 'UT'
+ei = 'UR'
+forecast = state_forecasts[state+ei]
+print(forecast.mape)
+print(forecast.info)
+forecast.plot()
+```
+### Analysis 2: Forecasting statewide indicators, taking differences to account for stationarity
+```python
+from Forecaster import Forecaster
+
+state_forecasts = {}
+for state in states: # states is a list of state abbreviations
+  for ei in ('PHCI','UR','SLIND'):
+    f = Forecaster()
+    if ei == 'PHCI':
+      f.get_data_fred(state+ei,i=2) # two differences to make this one stationary
+    else:
+      f.get_data_fred(state+ei,i=1) # one difference for these ones
+
+    f.generate_future_dates(12,'MS') # generate 12 monthly future dates to forecast 12 months to the future
+    f.forecast_ets(test_length=12)
+    f.forecast_tbats(test_length=12)
+    f.forecast_average()
+    state_forecasts[state+ei] = f
+
+# compare results
+state = 'UT'
+ei = 'UR'
+forecast = state_forecasts[state+ei]
+print(forecast.mape)
+print(forecast.info)
+forecast.plot()
+```
+### Analysis 3: Forecasting statewide indicators, using a dataframe of external regressors
+```python
+from Forecaster import Forecaster
+df = pd.read_csv('path/to/external/regressors.csv')
+
+state_forecasts = {}
+for state in states: # states is a list of state abbreviations
+  for ei in ('PHCI','UR','SLIND'):
+    f = Forecaster()
+    f.get_data_fred(state+ei)
+    f.process_xreg_df(df,date_col='Date',impute_missing='backward_fill') # automatically sets future dates and forecast periods
+    f.forecast_mlr(test_length=12)
+    f.forecast_svr(test_length=12)
+    f.forecast_mlp(test_length=12)
+    f.forecast_rf(test_length=12)
+    f.forecast_average(models='top_2')
+    state_forecasts[state+ei] = f
+
+# compare results
+state = 'UT'
+ei = 'UR'
+forecast = state_forecasts[state+ei]
+print(forecast.mape)
+print(forecast.info)
+forecast.plot()
+
+```
+### Analysis 4: Forecasting different length series
+```python
+from Forecaster import Forecaster
+
+df = pd.read_csv('path/to/df/with/time/series.csv',index_col=0) # each column is a series to forecast and the index is a datetime, daily data
+externals = pd.read_csv('path/to/externals.csv') # date should be a column, not index
+
+
+for c in df.columns:
+  y_load = df[c].drop_na() # nas are present when a certain series doesn't have data starting at the index's beginning
+  f = Forecaster(y=y_load.to_list(),current_dates=y_load.index.to_list(),name=c)
+  f.process_xreg_df(externals,date_col='Date')
+  test_length = 5 if len(y_load) < 100 else 30: # 5 day test length if less than 100 days of data, otherwise 30 days
+  if test_length == 5: # for shorter data series, you can use models that work better with shorter series
+    f.forecast_ets(test_length=test_length)
+    f.forecast_tbats(test_length=test_length)
+    f.forecast_auto_hwes(test_length=test_length)
+  else: # use more advanced techniques that utilize the regressors
+    for i in range(3): f.forecast_auto_arima(test_length=test_length,Xreg=f'top_{i}',call_me=f'arima_{i}_reg') # 0, 1, 2 regressors
+    f.forecast_nnetar(test_length=test_length,Xreg=['x1','x2','x4'],P=0)
+    f.forecast_arima(test_length=test_length,order=(1,1,1),Xreg='all',call_me='arima_all_reg')
+  f.forecast_average(models='top_5')
+```
+
+### Analysis 5: three ways to auto-forecast seasonality
+```python
+from Forecaster import Forecaster
+def main():
+  f = Forecaster()
+  f.get_data_fred('HOUSTNSA')
+
+  f.generate_future_dates(12,'MS')
+
+  f.forecast_auto_hwes(test_length=12,seasonal=True,seasonal_periods=12)
+
+  print(f.mape['auto_hwes'])
+
+  f.forecast_auto_arima_seas(test_length=12)
+
+  print(f.info['auto_arima_seas']['model_form'])
+  print(f.mape['auto_arima_seas'])
+
+  f.forecast_sarimax13(test_length=12,error='ignore')
+
+  print(f.info['sarimax13']['model_form'])
+  print(f.feature_importance['sarimax13'].index.to_list())
+  print(f.mape['sarimax13'])
+
+  f.forecast_average(models=['auto_arima_seas','sarimax13'])
+
+  print(f.mape['average'])
+
+  f.plot()
+
+if __name__ == '__main__':
+  main()
+```
+
+### Analysis 6: using the same model with different parameters
+```python
+from Forecaster import Forecaster
+
+df = pd.read_csv('path/to/df/with/time/series.csv',index_col=0) # each column is a series to forecast and the index is a datetime
+externals = pd.read_csv('path/to/externals.csv') # date should be a column, not index
+
+for c in df.columns:
+  y_load = df[c]
+  f = Forecaster(y=y_load.to_list(),current_dates=y_load.index.to_list(),name=c)
+  f.process_xreg_df(externals,date_col='Date')
+  f.forecast_nnetar(test_length=12,Xvars=None,P=0,boxcox=True,call_me='nnetar_1') # no seasonality, no xregs, use boxcox
+  f.forecast_nnetar(test_length=12,Xvars='all',P=0,boxcox=False,call_me='nnetar_2') # no seasonality, all xregs, no boxcox
+  f.forecast_nnetar(test_length=12,Xvars='all',P=0,boxcox=False,repeats=10,call_me='nnetar_3') # no seasonality, all xregs, 10 repeates, no boxcox
+  f.forecast_nnetar(test_length=12,Xvars='top_3',P=1,boxcox=False,call_me='nnetar_4') # 1 difference seasonality, top 3 xregs, no boxcox
+  f.forecast_average(models=['nnetar_1','nnetar_3'],call_me='combo_1') # combo of two neetar models
+  f.forecast_average(models=['nnetar_2','nnetar_4'],call_me='combo_2') # combo of two neetar models
+  f.forecast_average(models='top_2',call_me='combo_3') # combo of top_2 best models
+  f.forecast_average(models=['combo_1','combo_2','combo_3'],call_me='combo_combo') # combo of combos
+  f.forecast_average(models='top_3',exclude=[m for m in f.forecasts.keys() if m.startswith('combo')]) # top_3 nnetars combo
+```
+
+### Analysis 7: forecasting with a vecm  
+```python
+from Forecaster import Forecaster
+
+df_male = pd.read_csv('path/to/df/with/time/series_male.csv',index_col=0) # each column is a series to forecast and the index is a datetime
+df_female = pd.read_csv('path/to/df/with/time/series_female.csv',index_col=0) # each column is a series to forecast and the index is a datetime
+externals = pd.read_csv('path/to/externals.csv') # date should be a column, not index
+
+# we know male and female series are cointegrated
+
+# you can make a function to save all info from one forecasted VECM into another object
+def save_info_about_other_series(Forecaster_object_1,Forecaster_object_2,pos=1,call_me='vecm'):
+  """ save all info from one to the other, but it should be called right after you run one vecm so that no R tmp data is overwritten
+      pos is what position (0-indexed) to get data from the tmp R data
+  """
+  fo1, fo2 = Forecaster_object_1, Forecaster_object_2
+  fo2.mape[call_me] = fo1.mape[call_me]
+  fo2.info[call_me] = fo1.info[call_me]
+  fo2.feature_importance[call_me] = fo1.feature_importance[call_me]
+  fo2.forecasts[call_me] = pd.read_csv('tmp/tmp_r_forecast.csv').iloc[:,pos].to_list()
+
+forecasts = {}
+for c in df_male.columns:
+  y_load = df_male[c]
+  f_male = Forecaster(y=y_load.to_list(),current_dates=y_load.index.to_list(),name=c)
+  f_female.process_xreg_df(externals,date_col='Date')
+  f_male.forecast_vecm(df_female[c].to_list(),test_length=12,r=1,Xvars='top_5',max_lags=12,optimizer='BIC',max_externals=3)
+  save_info_about_other_series(f_male,f_female,1,'vecm')
 ```
