@@ -8,7 +8,7 @@
 [Ingesting a DataFrame of External Regressors](#ingesting-a-dataframe-of-external-regressors)  
 [Forecasting](#forecasting)  
 [Plotting](#plotting)  
-[Export Results](#export-results)
+[Export Results](#export-results)  
 [Examples](#examples)
 
 ## Overview:
@@ -755,14 +755,17 @@ def save_info_about_other_series(Forecaster_object_1,Forecaster_object_2,pos=1,c
   fo1, fo2 = Forecaster_object_1, Forecaster_object_2
   fo2.mape[call_me] = fo1.mape[call_me]
   fo2.info[call_me] = fo1.info[call_me]
+  fo2.info[call_me]['actuals'] = pd.read_csv('tmp/tmp_test_results.csv').iloc[:,pos].to_list()
   fo2.feature_importance[call_me] = fo1.feature_importance[call_me]
-  fo2.forecasts[call_me] = pd.read_csv('tmp/tmp_r_forecast.csv').iloc[:,pos].to_list()
+  fo2.forecasts[call_me] = pd.read_csv('tmp/tmp_forecast.csv').iloc[:,pos].to_list()
 
 forecasts = {}
 for c in df_male.columns:
-  y_load = df_male[c]
-  f_male = Forecaster(y=y_load.to_list(),current_dates=y_load.index.to_list(),name=c)
-  f_female.process_xreg_df(externals,date_col='Date')
-  f_male.forecast_vecm(df_female[c].to_list(),test_length=12,r=1,Xvars='top_5',max_lags=12,optimizer='BIC',max_externals=3)
+  y_load_male = df_male[c]
+  f_male = Forecaster(y=y_load_male.to_list(),current_dates=y_load_male.index.to_list(),name=c)
+  f_male.process_xreg_df(externals,date_col='Date')
+  y_load_female = df_female[c]
+  y_female = Forecaster(y=y_load_female.to_list(),current_dates=y_load_female.index.to_list(),name=c)
+  f_male.forecast_vecm(y_female.y,auto_resize=True,test_length=12,r=1,Xvars='top_5',max_lags=12,optimizer='BIC',max_externals=3)
   save_info_about_other_series(f_male,f_female,1,'vecm')
 ```
