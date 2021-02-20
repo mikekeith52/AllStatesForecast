@@ -2,12 +2,12 @@
 
 - Author Michael Keith: mikekeith52@gmail.com
 
-[Overview](#overview)
-[Initializing Objects](#initializing-objects)
-[Setting Forecast Periods](#setting-forecast-periods)
-[Ingesting a DataFrame of External Regressors](#ingesting-a-dataframe-of-external-regressors)
-[Forecasting](#forecasting)
-[Plotting](#plotting)
+[Overview](#overview)  
+[Initializing Objects](#initializing-objects)  
+[Setting Forecast Periods](#setting-forecast-periods)  
+[Ingesting a DataFrame of External Regressors](#ingesting-a-dataframe-of-external-regressors)  
+[Forecasting](#forecasting)  
+[Plotting](#plotting)  
 
 ## Overview:
 - object to forecast time series data  
