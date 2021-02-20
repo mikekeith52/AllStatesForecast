@@ -735,6 +735,7 @@ for c in df.columns:
   f.forecast_average(models='top_2',call_me='combo_3') # combo of top_2 best models
   f.forecast_average(models=['combo_1','combo_2','combo_3'],call_me='combo_combo') # combo of combos
   f.forecast_average(models='top_3',exclude=[m for m in f.forecasts.keys() if m.startswith('combo')]) # top_3 nnetars combo
+  forecasts[c] = f
 ```
 
 ### Analysis 7: forecasting with a vecm  
@@ -768,7 +769,9 @@ for c in df_male.columns:
   f_male = Forecaster(y=y_load_male.to_list(),current_dates=y_load_male.index.to_list(),name=c)
   f_male.process_xreg_df(externals,date_col='Date')
   y_load_female = df_female[c]
-  y_female = Forecaster(y=y_load_female.to_list(),current_dates=y_load_female.index.to_list(),name=c)
+  f_female = Forecaster(y=y_load_female.to_list(),current_dates=y_load_female.index.to_list(),name=c)
   f_male.forecast_vecm(y_female.y,auto_resize=True,test_length=test_length,r=1,Xvars='top_5',max_lags=12,optimizer='BIC',max_externals=3)
   save_info_about_other_series(f_male,f_female,1,'vecm')
+  forecasts[c+'_male'] = f_male
+  forecasts[c+'_female'] = f_female
 ```
