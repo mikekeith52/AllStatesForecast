@@ -9,3 +9,7 @@ Builds the Forecaster object to create easily accessed forecasts for many time s
 ## Installation
 - Be running Python 3.6+ on an [Anaconda](https://www.anaconda.com/products/individual) interpreter
 - Run all commands in requirements.txt on command line/terminal
+
+## Publications
+- [Apress Video Tutorial](https://link.springer.com/video/10.1007/978-1-4842-6893-3)
+- [Three Ways to Auto Forecast Seasonality](https://towardsdatascience.com/three-ways-to-auto-forecast-seasonality-b7c96256b771)
