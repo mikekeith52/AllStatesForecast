@@ -490,6 +490,11 @@ class Forecaster:
         k = Counter(ext_reg) 
         self.ordered_xreg = [h[0] for h in k.most_common()] # this should give us the ranked external regressors
 
+    def forecast(self,which,**kwargs):
+    	""" forecasts with a str method to allow for loops
+    	"""
+    	getattr(self,'forecast_'+which)(**kwargs)
+
     def forecast_auto_arima(self,test_length=1,Xvars=None,call_me='auto_arima'):
         """ Auto-Regressive Integrated Moving Average 
             forecasts using auto.arima from the forecast package in R
