@@ -781,10 +781,10 @@ results_df = f.export_to_df(which='all',save_csv=True,csv_name = '../OtherParent
 
 ## Everything Else
 
-[forecast()](#forecast)
-[order_all_forecasts_best_to_worst()](#order_all_forecasts_best_to_worst)
-[pop()](#pop)
-[set_best_model()](#set_best_model)
+[forecast()](#forecast)  
+[order_all_forecasts_best_to_worst()](#order_all_forecasts_best_to_worst)  
+[pop()](#pop)  
+[set_best_model()](#set_best_model)  
 
 ### forecast
 - `Forecaster.forecast(which,**kwargs)`
