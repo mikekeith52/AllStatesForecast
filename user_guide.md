@@ -8,7 +8,8 @@
 [Ingesting a DataFrame of External Regressors](#ingesting-a-dataframe-of-external-regressors)  
 [Forecasting](#forecasting)  
 [Plotting](#plotting)  
-[Export Results](#export-results)  
+[Export Results](#export-results)
+[Everything Else](#everything-else)  
 [Examples](#examples)
 
 ## Overview:
@@ -95,13 +96,18 @@ f = Forecaster(y=[1,2,3,4,5],current_dates=pd.to_datetime(['2020-01-01','2020-02
   - **n** : int
     - the number of periods to forecast
     - the length of the resulting future_dates attribute
+    - forecast_out_periods attribute will be this
   - **freq** : str
     - a pandas datetime freq value
     - https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
 ```python
 f = Forecaster()
 f.get_data_fred('UTUR')
-f.generate_future_dates(12,'MS')
+f.generate_future_dates(3,'MS')
+print(f.future_dates)
+>>> [Timestamp('2020-11-01 00:00:00'), Timestamp('2020-12-01 00:00:00'), Timestamp('2021-01-01 00:00:00')]
+print(f.forecast_out_periods)
+>>> 3
 ```
 2. `Forecaster.set_forecast_out_periods(n)`
 - sets the self.forecast_out_periods attribute and truncates self.future_dates and self.future_xreg if needed
@@ -114,13 +120,13 @@ f.generate_future_dates(12,'MS')
 f = Forecaster()
 f.get_data_fred('UTUR')
 f.generate_future_dates(12,'MS')
-f.set_forecast_out_periods(6)
+f.set_forecast_out_periods(6) # reduces the forecast from 12 to 6 periods
 ```
 
 ## Ingesting a DataFrame of External Regressors
 
-- `Forecaster.process_xreg_df(self,xreg_df,date_col,process_columns=False)`
-- takes a dataframe of external regressors
+- `Forecaster.process_xreg_df(xreg_df,date_col,process_columns=False)`
+- takes a dataframe of external regressors and ingests it into the object
 - any non-numeric data will be made into a 0/1 binary variable (using pandas.get_dummies(drop_first=True))
 - deals with columns with missing data
 - eliminates rows that don't correspond with self.y's timeframe
@@ -139,7 +145,7 @@ f.set_forecast_out_periods(6)
     - how to process columns with missing data - most forecasts will not run when missing data is present in either xreg dict
     - supported: {'remove','impute_mean','impute_median','impute_mode','impute_min','impute_max',impute_0','forward_fill','backward_fill','impute_random'}
     - if str, must be one of supported and that method is applied to all columns with missing data
-    - if dict, key is a column and value is one of supported, method only applied to columns with missing data                  
+    - if dict, key is a column and value is one of supported, method only applied to columns with missing data (so {'col1':'remove'} will not remove col1 unless there is missing data in it)               
     - 'impute_random' will fill in missing values with random draws from the same column
 ```python           
 xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
@@ -160,26 +166,69 @@ print(f.forecast_out_periods)
 
 ## Forecasting
 - methods: 
-  - [forecast_auto_arima()](#forecast_auto_arima) 
   - [forecast_adaboost()](#forecast_adaboost) 
+  - [forecast_arima()](#forecast_arima)  
+  - [forecast_auto_arima()](#forecast_auto_arima) 
   - [forecast_auto_arima_seas()](#forecast_auto_arima_seas) 
-  - [forecast_arima()](#forecast_arima)
-  - [forecast_sarimax13()](#forecast_sarimax13)
-  - [forecast_average()](#forecast_average)
+  - [forecast_auto_hwes()](#forecast_auto_hwes)
+  - [forecast_average()](#forecast_average)  
   - [forecast_ets()](#forecast_ets)
   - [forecast_gbt()](#forecast_gbt)
   - [forecast_hwes()](#forecast_hwes)
-  - [forecast_auto_hwes()](#forecast_auto_hwes)
   - [forecast_lasso()](#forecast_lasso)
   - [forecast_mlp()](#forecast_mlp)
   - [forecast_mlr()](#forecast_mlr)
+  - [forecast_nnetar()](#forecast_nnetar)
   - [forecast_rf()](#forecast_rf)
   - [forecast_ridge()](#forecast_ridge)
+  - [forecast_sarimax13()](#forecast_sarimax13)
+  - [forecast_splice()](#forecast_splice)
   - [forecast_svr()](#forecast_svr)
   - [forecast_tbats()](#forecast_tbats)
-  - [forecast_nnetar()](#forecast_nnetar)
   - [forecast_var()](#forecast_var)
   - [forecast_vecm()](#forecast_vecm)
+
+### forecast_adaboost
+- `Forecaster.forecast_adaboost(test_length=1,Xvars='all',call_me='adaboost',hyper_params={},set_feature_importance=True)`
+- forecasts the stored y variable with an ada boost regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.AdaBoostRegressor.html)
+- Parameters: 
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1 
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "rf"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - **hyper_params** : dict, default {}
+    - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+    - passed as an argument collection to the sklearn model
+  - **set_feature_importance** : bool, default True
+    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
+
+### forecast_arima
+- `Forecaster.forecast_arima(test_length=1,Xvars=None,order=(0,0,0),seasonal_order=(0,0,0,0),trend=None,call_me='arima',**kwargs)`
+- ARIMA model from statsmodels: https://www.statsmodels.org/stable/generated/statsmodels.tsa.arima.model.ARIMA.html
+- the args endog, exog, and dates passed automatically  
+- the args order, seasonal_order, and trend should be specified in the method  
+- all other arguments in the ARIMA() function can be passed to kwargs  
+- using this framework, the following model types can be specified:  
+  - AR, MA, ARMA, ARIMA, SARIMA, regression with ARIMA errors  
+- this is meant for manual arima modeling; for a more automated implementation, see the forecast_auto_arima() and forecast_sarimax13() methods  
+- Parameters: 
+  - **test_length** : int, default 1  
+    - the number of periods to holdout in order to test the model  
+    - must be at least 1   
+  - **Xvars** : list, "all", or None default None  
+    - the independent variables to use in the resulting X dataframes  
+    - "top_" not supported  
+  - **call_me** : str, default "arima"  
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+  - Info about all other arguments (order, seasonal_order, trend) can be found in the sm.tsa.arima.model.ARIMA documentation (linked above)  
+  - other arguments from ARIMA() function can be passed as keywords  
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults 
 
 ### forecast_auto_arima
 - `Forecaster.forecast_auto_arima(test_length=1,Xvars=None,call_me='auto_arima')`
@@ -190,15 +239,15 @@ print(f.forecast_out_periods)
 - Parameters: 
   - **test_length** : int, default 1
       - the number of periods to holdout in order to test the model  
-      - must be at least 1 (AssertionError raised if not)  
+      - must be at least 1   
   - **Xvars** : list, "all", None, or starts with "top_", default None  
       - the independent variables used to make predictions  
       - if it is a list, will attempt to estimate a model with that list of Xvars  
       - if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars  
       - "top" is determined through absolute value of the pearson correlation coefficient on the training set  
-      - if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available       - regressors that are not perfectly colinear and have variation  
+      - if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available regressors that are not perfectly colinear and have variation  
       - if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation  
-      - because the auto.arima function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is       - option  
+      - because the auto.arima function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option  
       - if no arima model can be estimated, will raise an error
   - **call_me** : str, default "auto_arima"
       - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
@@ -234,7 +283,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - Parameters: 
   - **test_length** : int, default 1  
     - the number of periods to holdout in order to test the model  
-    - must be at least 1 (AssertionError raised if not)  
+    - must be at least 1   
   - **start** : tuple of length 2 or "auto", default "auto"  
     - 1st element is the start year  
     - 2nd element is the start period in the appropriate interval  
@@ -255,69 +304,84 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
-### forecast_sarimax13
-- `Forecaster.forecast_sarimax13(test_length=1,start='auto',interval=12,Xvars=None,call_me='sarimax13',error='raise')`
-- Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/  
-- Forecasts using the seas function from the seasonal package, also need the X13 software (x13as.exe) saved locally  
-- Automatically takes the best model ARIMA model form that fulfills a certain set of criteria (low forecast error rate, high statistical significance, etc)  
-- X13 is a sophisticated way to model seasonality with ARIMA maintained by the census bureau, and the seasonal package provides a simple wrapper around the software with R  
-- The function here is simplified, but the power in X13 is its database offers precise ways to model seasonality, also takes into account outliers  
-- Documentation: https://cran.r-project.org/web/packages/seasonal/seasonal.pdf, http://www.seasonal.website/examples.html  
-- This package only allows for monthly or less granular observations, and only three years or fewer of predictions  
-- the model will fail if there are 0 or negative values in the dependent variable attempted to be predicted  
-- the model can fail for several other reasons (including lack of seasonality in the dependent variable)  
-- Parameters: 
-  - **test_length** : int, default 1  
-      - the number of periods to holdout in order to test the model  
-      - must be at least 1 (AssertionError raised if not)  
-  - **start** : tuple of length 2 or "auto", default "auto"  
-      - 1st element is the start year  
-      - 2nd element is the start period in the appropriate interval  
-      - for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)  
-      - if "auto", assumes the dates in self.current_dates are monthly in yyyy-mm-01 format and will use the first element in the list  
-  - **interval** : 1 of {1,2,4,12}, default 12  
-      - 1 for annual, 2 for bi-annual, 4 for quarterly, 12 for monthly  
-      - unfortunately, x13 does not allow for more granularity than the monthly level  
-  - **Xvars** : list, "all", None, or starts with "top_", default None  
-      - the independent variables used to make predictions  
-      - if it is a list, will attempt to estimate a model with that list of Xvars  
-      - if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars  
-      - "top" is determined through absolute value of the pearson correlation coefficient on the training set  
-      - if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation  
-      - if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation  
-      - because the seas function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option  
-      - x13 already has an extensive list of x regressors that it will pull automatically--read the documentation for more info  
-  - **call_me** : str, default "sarimax13"  
-      - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
-  - **error**: one of {"raise","pass","print"}, default "raise"  
-      - if unable to estimate the model, "raise" will raise an error  
-      - if unable to estimate the model, "pass" will silently skip the model and delete all associated attribute keys (self.info)  
-      - if unable to estimate the model, "print" will skip the model, delete all associated attribute keys (self.info), and print the error  
-      - errors are common even if you specify everything correctly -- it has to do with the X13 estimator itself  
-      - one common error is caused when negative or 0 values are present in the dependent variables  
-- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
-
-### forecast_arima
-- `Forecaster.forecast_arima(test_length=1,Xvars=None,order=(0,0,0),seasonal_order=(0,0,0,0),trend=None,call_me='arima',**kwargs)`
-- ARIMA model from statsmodels: https://www.statsmodels.org/stable/generated/statsmodels.tsa.arima.model.ARIMA.html
-- the args endog, exog, and dates passed automatically  
-- the args order, seasonal_order, and trend should be specified in the method  
-- all other arguments in the ARIMA() function can be passed to kwargs  
-- using this framework, the following model types can be specified:  
-  - AR, MA, ARMA, ARIMA, SARIMA, regression with ARIMA errors  
-- this is meant for manual arima modeling; for a more automated implementation, see the forecast_auto_arima() and forecast_sarimax13() methods  
+### forecast_auto_hwes
+- `Forecaster.forecast_auto_hwes(test_length=1,seasonal=False,seasonal_periods=None,call_me='auto_hwes')`
+- Holt-Winters Exponential Smoothing  
+- https://www.statsmodels.org/stable/generated/statsmodels.tsa.holtwinters.ExponentialSmoothing.html  
+- https://towardsdatascience.com/holt-winters-exponential-smoothing-d703072c0572  
+- The Holt-Winters ES modifies the Holt ES technique so that it can be used in the presence of both trend and seasonality.  
+- Will add different trend and seasonal components automatically and test which minimizes AIC of in-sample predictions  
+- uses optimized model parameters to fit final model  
+- for a more manual holt-winters application, see [forecast_hwes()](#forecast_hwes)  
 - Parameters: 
   - **test_length** : int, default 1  
     - the number of periods to holdout in order to test the model  
-    - must be at least 1 (AssertionError raised if not)  
-  - **Xvars** : list, "all", or None default None  
-    - the independent variables to use in the resulting X dataframes  
-    - "top_" not supported  
-  - **call_me** : str, default "arima"  
+    - must be at least 1   
+  - **seasonal** : bool, default False  
+    - whether there is seasonality in the series  
+  - **seasonal_periods** : int, default None  
+    - the number of periods to complete one seasonal period (for monthly, this is 12)  
+    - ignored if seasonal is False  
+  - **call_me** : str, default "hwes"  
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
-  - Info about all other arguments (order, seasonal_order, trend) can be found in the sm.tsa.arima.model.ARIMA documentation (linked above)  
-  - other arguments from ARIMA() function can be passed as keywords  
-- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults 
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults   
+
+### forecast_average
+- `Forecaster.forecast_average(models='all',exclude=None,call_me='average',test_length='max')`
+- averages a set of models to make a new estimator  
+- Parameters: 
+  - **models** : list, "all", or starts with "top_", default "all"  
+    - "all" will average all models  
+    - starts with "top_" will average the top however many models are specified according to their respective MAPE values on the test set (lower = better)  
+      - the character after "top_" must be an integer  
+      - ex. "top_5"  
+    - if list, then those are the models that will be averaged  
+  - **exclude** : list, default None  
+    - manually exlcude some models  
+    - all models passed here will be excluded  
+    - if models parameters starts with "top" and one of those top models is in the list passed to exclude, that model will be excluded, and the other however many will be averaged (so you might only get 3 models averaged if you pass "top_4" for example)  
+  - **call_me** : str, default "average"  
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+  - **test_length** : int or "max", default "max"  
+    - the test length to assign to the average model  
+    - if max, it will use the maximum test_length that all saved models can support  
+    - if int, will use that many test periods  
+    - if int is greater than one of the stored models' test length, this will fail  
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
+
+### forecast_ets
+- `Forecaster.forecast_ets(test_length=1,call_me='ets')`
+- Exponential Smoothing State Space Model  
+- forecasts using ets from the forecast package in R  
+- auto-regressive only (no external regressors)  
+- this is an automated model selection  
+- Parameters: 
+  - **test_length** : int, default 1  
+    - the number of periods to holdout in order to test the model  
+    - must be at least 1 
+  - **call_me** : str, default "ets"  
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
+
+### forecast_gbt
+- `Forecaster.forecast_gbt(test_length=1,Xvars='all',call_me='gbt',hyper_params={},set_feature_importance=True)`
+- forecasts the stored y variable with a gradient boosting regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingRegressor.html)
+- Parameters: 
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "gbt"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - **hyper_params** : dict, default {}
+    - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+    - passed as an argument collection to the sklearn model
+  - **set_feature_importance** : bool, default True
+    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
 ### forecast_hwes
 - `Forecaster.forecast_hwes(test_length=1,call_me='hwes',**kwargs)`
@@ -330,34 +394,109 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - Parameters: 
   - **test_length** : int, default 1  
     - the number of periods to holdout in order to test the model  
-    - must be at least 1 (AssertionError raised if not)  
+    - must be at least 1   
   - **call_me** : str, default "hwes"  
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
   - keywords are passed to the ExponentialSmoothing function from statsmodels -- `dates` is specified automatically  
   - some important parameters to specify as key words: trend, damped_trend, seasonal, seasonal_periods, use_boxcox  
-- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults   
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
 
-### forecast_auto_hwes
-- `Forecaster.forecast_auto_hwes(test_length=1,seasonal=False,seasonal_periods=None,call_me='auto_hwes')`
-- Holt-Winters Exponential Smoothing  
-- https://www.statsmodels.org/stable/generated/statsmodels.tsa.holtwinters.ExponentialSmoothing.html  
-- https://towardsdatascience.com/holt-winters-exponential-smoothing-d703072c0572  
-- The Holt-Winters ES modifies the Holt ES technique so that it can be used in the presence of both trend and seasonality.  
-- Will add different trend and seasonal components automatically and test which minimizes AIC of in-sample predictions  
-- uses optimized model parameters to fit final model  
-- for a more manual holt-winters application, see forecast_hwes()  
+### forecast_lasso
+- `Forecaster.forecast_lasso(test_length=1,Xvars='all',call_me='lasso',alpha=1.0,set_feature_importance=True)`
+- forecasts the stored y variable with a lasso regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Lasso.html)
 - Parameters: 
-  - **test_length** : int, default 1  
-    - the number of periods to holdout in order to test the model  
-    - must be at least 1 (AssertionError raised if not)  
-  - **seasonal** : bool, default False  
-    - whether there is seasonality in the series  
-  - **seasonal_periods** : int, default None  
-    - the number of periods to complete one seasonal period (for monthly, this is 12)  
-    - ignored if seasonal is False  
-  - **call_me** : str, default "hwes"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
-- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults   
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "lasso"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - **alpha** : float, default 1.0
+    - the desired alpha hyperparameter to pass to the sklearn model
+    - 1.0 is also the default in sklearn
+  - **set_feature_importance** : bool, default True
+    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed  
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
+
+### forecast_mlp
+- `Forecaster.forecast_mlp(test_length=1,Xvars='all',call_me='mlp',hyper_params={},set_feature_importance=True)`
+- forecasts the stored y variable with a multi level perceptron neural network from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPRegressor.html)
+- Parameters: 
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "mlp"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - **hyper_params** : dict, default {}
+    - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+    - passed as an argument collection to the sklearn model
+  - **set_feature_importance** : bool, default True
+    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
+
+### forecast_mlr
+- `Forecaster.forecast_mlr(test_length=1,Xvars='all',call_me='mlr',set_feature_importance=True)`
+- forecasts the stored y variable with a multi linear regression from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LinearRegression.html)
+- Parameters: 
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "mlr"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - **set_feature_importance** : bool, default True
+    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
+
+### forecast_rf
+- `Forecaster.forecast_rf(test_length=1,Xvars='all',call_me='rf',hyper_params={},set_feature_importance=True)`
+- forecasts the stored y variable with a random forest from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html)
+- Parameters: 
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "rf"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - **hyper_params** : dict, default {}
+    - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+    - passed as an argument collection to the sklearn model
+  - **set_feature_importance** : bool, default True
+    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
+
+### forecast_ridge
+- `Forecaster.forecast_ridge(test_length=1,Xvars='all',call_me='ridge',alpha=1.0,set_feature_importance=True)`
+- forecasts the stored y variable with a ridge regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Ridge.html)
+- Parameters: 
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "ridge"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - **alpha** : float, default 1.0
+    - the desired alpha hyperparameter to pass to the sklearn model
+    - 1.0 is also the default in sklearn
+  - **set_feature_importance** : bool, default True
+    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
 
 ### forecast_nnetar
 - `Forecaster.forecast_nnetar(test_length=1,start='auto',interval=12,Xvars=None,P=1,boxcox=False,scale_inputs=True,repeats=20,negative_y='raise',call_me='nnetar')`
@@ -367,7 +506,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - Parameters: 
   - **test_length** : int, default 1  
     - the number of periods to holdout in order to test the model  
-    - must be at least 1 (AssertionError raised if not)  
+    - must be at least 1   
   - **start** : tuple of length 2 or "auto", default "auto"  
     - 1st element is the start year  
     - 2nd element is the start period in the appropriate interval  
@@ -401,6 +540,88 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
+### forecast_sarimax13
+- `Forecaster.forecast_sarimax13(test_length=1,start='auto',interval=12,Xvars=None,call_me='sarimax13',error='raise')`
+- Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/  
+- Forecasts using the seas function from the seasonal package in R
+- Automatically takes the best model ARIMA model form that fulfills a certain set of criteria (low forecast error rate, high statistical significance, etc)  
+- X13 is a sophisticated way to model seasonality with ARIMA maintained by the census bureau, and the seasonal package provides a simple wrapper around the software with R  
+- The function here is simplified, but the power in X13 is its database offers precise ways to model seasonality, also takes into account outliers  
+- Documentation: https://cran.r-project.org/web/packages/seasonal/seasonal.pdf, http://www.seasonal.website/examples.html  
+- This package only allows for monthly or less granular observations, and only three years or fewer of predictions  
+- the model will fail if there are 0 or negative values in the dependent variable attempted to be predicted  
+- the model can fail for several other reasons (including lack of seasonality in the dependent variable)  
+- Parameters: 
+  - **test_length** : int, default 1  
+      - the number of periods to holdout in order to test the model  
+      - must be at least 1   
+  - **start** : tuple of length 2 or "auto", default "auto"  
+      - 1st element is the start year  
+      - 2nd element is the start period in the appropriate interval  
+      - for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)  
+      - if "auto", assumes the dates in self.current_dates are monthly in yyyy-mm-01 format and will use the first element in the list  
+  - **interval** : 1 of {1,2,4,12}, default 12  
+      - 1 for annual, 2 for bi-annual, 4 for quarterly, 12 for monthly  
+      - unfortunately, x13 does not allow for more granularity than the monthly level  
+  - **Xvars** : list, "all", None, or starts with "top_", default None  
+      - the independent variables used to make predictions  
+      - if it is a list, will attempt to estimate a model with that list of Xvars  
+      - if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars  
+      - "top" is determined through absolute value of the pearson correlation coefficient on the training set  
+      - if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation  
+      - if it is "all", will attempt to estimate a model with all available x regressors, regardless of whether there is collinearity or no variation  
+      - because the seas function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option  
+      - x13 already has an extensive list of x regressors that it will pull automatically--read the documentation for more info  
+  - **call_me** : str, default "sarimax13"  
+      - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+  - **error**: one of {"raise","pass","print"}, default "raise"  
+      - if unable to estimate the model, "raise" will raise an error  
+      - if unable to estimate the model, "pass" will silently skip the model
+      - if unable to estimate the model, "print" will skip the model and print the error  
+      - errors are common even if you specify everything correctly -- it has to do with the X13 estimator itself  
+      - one common error is caused when negative or 0 values are present in the dependent variables  
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
+
+### forecast_splice
+- `Forecaster.forecast_splice(models,periods,force_mape=None,call_me='splice')`
+- splices multiple forecasts together
+- this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
+- Parameters: 
+  - **models** : list
+  - **periods** : tuple of datetime objects
+    - must be one less in length than models
+    - each date represents a splice
+      - model[0] --> :periods[0]
+      - models[-1] --> periods[-1]:
+  - **force_mape** : float, default None
+    - since some class methods will fail if mape isn't numeric, you can force a numeric mape value here
+  - **call_me** : str
+    - the model nickname
+```python
+f.forecast_splice(models=['arima','tbats'],periods=(datetime.datetime(2020,1,1),)) # one splice in january 2020
+f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020,1,1),datetime.datetime(2020,3,1))) # two splices in january and march 2020, respectively
+```
+
+### forecast_svr
+- `Forecaster.forecast_svr(test_length=1,Xvars='all',call_me='svr',hyper_params={},set_feature_importance=True)`
+- forecasts the stored y variable with a support vector regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVR.html)
+- Parameters: 
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "mlp"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - **hyper_params** : dict, default {}
+    - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+    - passed as an argument collection to the sklearn model
+  - **set_feature_importance** : bool, default True
+    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
+
 ### forecast_tbats
 - `Forecaster.forecast_tbats(test_length=1,season='NULL',call_me='tbats')`
 - Exponential Smoothing State Space Model With Box-Cox Transformation, ARMA Errors, Trend And Seasonal Component  
@@ -410,24 +631,11 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - Parameters: 
   - **test_length** : int, default 1  
     - the number of periods to holdout in order to test the model  
-    - must be at least 1 (AssertionError raised if not)  
+    - must be at least 1   
   - **season** : int or "NULL"  
     - the number of seasonal periods to consider (12 for monthly, etc.)  
     - if no seasonality desired, leave "NULL" as this will be passed directly to the tbats function in r  
   - **call_me** : str, default "tbats"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
-- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
-
-### forecast_ets
-- `Forecaster.forecast_ets(test_length=1,call_me='ets')`
-- Exponential Smoothing State Space Model  
-- forecasts using ets from the forecast package in R  
-- auto-regressive only (no external regressors)  
-- this is an automated model selection  
-- Parameters: test_length : int, default 1  
-    - the number of periods to holdout in order to test the model  
-    - must be at least 1 (AssertionError raised if not)  
-  - call_me : str, default "ets"  
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
@@ -448,7 +656,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
     - using this assumes that the shortest series ends at the same time the others do and there are no periods missing  
   - **test_length** : int, default 1  
     - the number of periods to hold out in order to test the model  
-    - must be at least 1 (AssertionError raised if not)  
+    - must be at least 1   
   - **Xvars** : list, "all", None, or starts with "top_", default None  
     - the independent variables used to make predictions  
     - if it is a list, will attempt to estimate a model with that list of Xvars  
@@ -475,6 +683,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
   - **call_me** : str, default "var"  
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
+- See [Analysis 7](#analysis-7) for an example of how to run a vector error correction model (which is similar to the setup for var)
 
 ### forecast_vecm  
 - `Forecaster.forecast_vecm(*cids,auto_resize=False,test_length=1,Xvars=None,r=1,max_lags=6,optimizer='AIC',max_externals=None,call_me='vecm')`
@@ -494,7 +703,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
     - using this assumes that the shortest series ends at the same time the others do and there are no periods missing  
   - **test_length** : int, default 1  
     - the number of periods to hold out in order to test the model  
-    - must be at least 1 (AssertionError raised if not)  
+    - must be at least 1   
   - **Xvars** : list, "all", None, or starts with "top_", default None  
     - the independent variables used to make predictions  
     - if it is a list, will attempt to estimate a model with that list of Xvars  
@@ -505,11 +714,9 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
     - because the VECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option  
   - **r** : int, default 1  
     - the number of total cointegrated relationships between self.y and cids  
-    - if not an int or less than 1, an AssertionError is raised  
   - **max_lags** : int, default 6  
     - the total number of lags that will be used in the optimization process  
     - 1 to this number will be attempted  
-    - if not an int or less than 0, an AssertionError is raised  
   - **optimizer** : str, one of {"AIC","BIC"}; default "AIC"  
     - the information criteria used to select the best model in the optimization grid  
     - a good, short resource to understand the difference: https://www.methodology.psu.edu/resources/AIC-vs-BIC/  
@@ -520,30 +727,8 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
     - reducing this from None can speed up processing and reduce overfitting  
   - **call_me** : str, default "vecm"  
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
-- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
-
-### forecast_average
-- `Forecaster.forecast_average(models='all',exclude=None,call_me='average',test_length='max')`
-- averages a set of models to make a new estimator  
-- Parameters: 
-  - **models** : list, "all", or starts with "top_", default "all"  
-    - "all" will average all models  
-    - starts with "top_" will average the top however many models are specified according to their respective MAPE values on the test set (lower = better)  
-      - the character after "top_" must be an integer  
-      - ex. "top_5"  
-    - if list, then those are the models that will be averaged  
-  - **exclude** : list, default None  
-    - manually exlcude some models  
-    - all models passed here will be excluded  
-    - if models parameters starts with "top" and one of those top models is in the list passed to exclude, that model will be excluded, and the other however many will be averaged (so you might only get 3 models averaged if you pass "top_4" for example)  
-  - **call_me** : str, default "average"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
-  - **test_length** : int or "max", default "max"  
-    - the test length to assign to the average model  
-    - if max, it will use the maximum test_length that all saved models can support  
-    - if int, will use that many test periods  
-    - if int is greater than one of the stored models' test length, this will fail  
-- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults 
+- See [Analysis 7](#analysis-7) for an example of how to run a vector error correction model
 
 ## Plotting
 - `Forecaster.plot(models='all',plot_fitted=False,print_model_form=False,print_mapes=False)`
@@ -568,6 +753,88 @@ f.plot()
 f.plot(models=['arima','tbats'])
 f.plot(models='top_4')
 f.plot(models='top_1',print_mapes=True,plot_fitted=True)
+```
+
+## Export Results
+- `Forecaster.export_to_df(which='top_1',save_csv=False,csv_name='forecast_results.csv')`
+- exports a forecast or forecasts to a pandas dataframe with future dates as the index and each exported forecast as a column
+- returns a pandas dataframe
+- will fail if you attempt to export forecasts of varying lengths
+- by default, exports the best evaluated model by MAPE
+- Parameters: 
+  - **which** : starts with "top_", "all", or list; default "top_1"
+    - which forecasts to export
+    - if a list, should be a list of model nicknames
+  - **save_csv** : bool, default False
+    - whether to save the dataframe to a csv file in the current directory
+  - **csv_name** : str, default "forecat_results.csv"
+    - the name of the csv file to be written out
+    - ignored if save_csv is False
+    - default pd.to_csv() called (comma delimited)
+    - you can use this to change where the file is saved by specifying the file path
+```python
+results_df = f.export_to_df(which=['auto_arima','nnetar']) # no csv file will be written, but a pandas dataframe is stored in results_df
+f.export_to_df(which='top_1',save_csv=True) # saves top model as a csv to the working directory as forecast_results.csv
+f.export_to_df(which='top_2',save_csv=True,csv_name = 'C:/NotWorkingDirectory/top_2_forecast_results.csv') # saves csv to a different directory
+results_df = f.export_to_df(which='all',save_csv=True,csv_name = '../OtherParentDirectory/all_forecast_results.csv') # returns pandas dataframe and saves csv to a different directory
+```
+
+## Everything Else
+
+[forecast()](#forecast)
+[order_all_forecasts_best_to_worst()](#order_all_forecasts_best_to_worst)
+[pop()](#pop)
+[set_best_model()](#set_best_model)
+
+### forecast
+- `Forecaster.forecast(which,**kwargs)`
+- forecasts with a str argument to allow for loops
+- Parameters:
+  - **which** : str
+    - the model to forecast
+  - key words passed to the model arguments
+```python
+models = ('ets','tbats','auto_arima')
+for m in models:
+  f.forecast(m,test_length=3)
+```
+
+### order_all_forecasts_best_to_worst
+- `Forecaster.order_all_forecasts_best_to_worst()`
+- returns a list of the evaluated models for the given series in order of best-to-worst according to their evaluated MAPE values
+```python
+print(f.order_all_forecasts_best_to_worst)
+>>> ['tbats','ets','auto_arima']
+```
+
+### pop
+- `Forecaster.pop(which)`
+- deletes a forecast or list of forecasts from the object
+- Parameters: 
+  - **which** : str or list-like
+    - if str, that model will be popped
+    - if not str, must be an iterable where elements are model nicknames stored in the object
+```python
+f = Forecaster()
+f.get_data_fred('UTUR')
+f.forecast_auto_arima()
+f.pop('auto_arima')
+print(f.forecasts)
+>>> {}
+print(f.info)
+>>> {}
+print(f.mape)
+>>> {}
+```
+
+### set_best_model
+- `Forecaster.set_best_model()`
+- sets the best forecast model based on which model has the lowest MAPE value for the given holdout periods
+- if two or more models tie, it will select whichever one was evaluated first
+```python
+f.set_best_model()
+print(f.best_model)
+>>> 'auto_arima'
 ```
 
 ## Examples
@@ -658,7 +925,6 @@ forecast = state_forecasts[state+ei]
 print(forecast.mape)
 print(forecast.info)
 forecast.plot()
-
 ```
 ### Analysis 4
 - Forecasting different length series
@@ -693,28 +959,18 @@ from Forecaster import Forecaster
 def main():
   f = Forecaster()
   f.get_data_fred('HOUSTNSA')
-
   f.generate_future_dates(12,'MS')
-
   f.forecast_auto_hwes(test_length=12,seasonal=True,seasonal_periods=12)
-
   print(f.mape['auto_hwes'])
-
   f.forecast_auto_arima_seas(test_length=12)
-
   print(f.info['auto_arima_seas']['model_form'])
   print(f.mape['auto_arima_seas'])
-
   f.forecast_sarimax13(test_length=12,error='ignore')
-
   print(f.info['sarimax13']['model_form'])
   print(f.feature_importance['sarimax13'].index.to_list())
   print(f.mape['sarimax13'])
-
   f.forecast_average(models=['auto_arima_seas','sarimax13'])
-
   print(f.mape['average'])
-
   f.plot()
 
 if __name__ == '__main__':
@@ -746,7 +1002,7 @@ for c in df.columns:
 ```
 
 ### Analysis 7
-- forecasting with a vecm  
+- forecasting with a vecm (or var with minimal adjustments)
 ```python
 from Forecaster import Forecaster
 
@@ -757,19 +1013,34 @@ externals = pd.read_csv('path/to/externals.csv') # date should be a column, not 
 # we know male and female series are cointegrated
 
 # you can make a function to save all info from one forecasted VECM into another object
-def save_info_about_other_series(Forecaster_object_1,Forecaster_object_2,pos=1,call_me='vecm'):
-  """ save all info from one to the other, but it should be called right after you run one vecm so that no R tmp data is overwritten
-      pos is what position (0-indexed) to get data from the tmp R data
-      this can scale to n series used in a vecm
+def save_info_about_other_series(trgt_obj,from_obj,pos=1,call_me='vecm'):
+  """ saves info about a vecm model that was run for a different series to a new Forecaster object
+      works for n number of series
+      Parameters: from_obj : Forecaster
+                      the forecaster object where the vecm forecast is stored
+                  trgt_obj : Forecaster
+                      the target forecaster object
+                  pos : int, default 1
+                      the position of the target data in the tmp csv files written out from the original vecm, 0 indexed
+                      0 is where the from_obj data is located, subsequent positions represent subsequent forecast results
+                  call_me
+                      the target object's nickname -- must be the same as the from_obj call_me
   """
-  fo1, fo2 = Forecaster_object_1, Forecaster_object_2
-  fo2.info[call_me] = fo1.info[call_me].copy()
-  fo2.info[call_me]['test_set_predictions'] = pd.read_csv('tmp/tmp_test_results.csv').iloc[:,pos].to_list()
-  fo2.info[call_me]['test_set_actuals'] = fo2.y[-test_length:]
-  fo2.info[call_me]['test_set_ape'] = (np.abs(y - yhat) / np.ab(y) for y,yhat in zip(fo2.info[call_me]['test_set_actuals'],fo2.info[call_me]['test_set_predictions']))
-  fo2.mape[call_me] = mean(fo2.info[call_me]['test_set_ape'])
-  fo2.feature_importance[call_me] = fo1.feature_importance[call_me].copy()
-  fo2.forecasts[call_me] = pd.read_csv('tmp/tmp_forecast.csv').iloc[:,pos].to_list()
+  tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
+  tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
+  tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
+  trgt_obj.info[call_me] = dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape'])
+  trgt_obj.info[call_me]['holdout_periods'] = tmp_test_results.shape[0]
+  trgt_obj.info[call_me]['test_set_predictions'] = tmp_test_results.iloc[:,pos].to_list()
+  trgt_obj.info[call_me]['test_set_actuals'] = trgt_obj.y[(-test_length):]
+  trgt_obj.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(trgt_obj.y[(-test_length):],tmp_test_results.iloc[:,pos])]
+  trgt_obj.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
+  trgt_obj.info[call_me]['fitted_values'] = None
+  trgt_obj.mape[call_me] = np.array(trgt_obj.info[call_me]['test_set_ape']).mean()
+  trgt_obj.forecasts[call_me] = tmp_forecast.iloc[:,pos].to_list()
+  
+  if call_me in from_obj.feature_importance.keys():
+      trgt_obj.feature_importance[call_me] = from_obj.feature_importance[call_me].copy()
 
 forecasts = {}
 test_length=12

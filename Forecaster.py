@@ -2189,6 +2189,8 @@ class Forecaster:
                     self.feature_importance.pop(m)
 
     def display_ts_plot(self,**kwargs):
+        """ legacy method
+        """
         self.plot(**kwargs)
 
     def plot(self,models='all',plot_fitted=False,print_model_form=False,print_mapes=False):
