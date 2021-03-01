@@ -8,9 +8,9 @@
 [Ingesting a DataFrame of External Regressors](#ingesting-a-dataframe-of-external-regressors)  
 [Forecasting](#forecasting)  
 [Plotting](#plotting)  
-[Export Results](#export-results)
+[Export Results](#export-results)  
 [Everything Else](#everything-else)  
-[Examples](#examples)
+[Examples](#examples)  
 
 ## Overview:
 - object to forecast time series data  
