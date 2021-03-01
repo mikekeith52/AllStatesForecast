@@ -8,7 +8,7 @@
 [Ingesting a DataFrame of External Regressors](#ingesting-a-dataframe-of-external-regressors)  
 [Forecasting](#forecasting)  
 [Plotting](#plotting)  
-[Export Results](#export-results)  
+[Exporting Results](#exporting-results)  
 [Everything Else](#everything-else)  
 [Examples](#examples)  
 
@@ -755,7 +755,7 @@ f.plot(models='top_4')
 f.plot(models='top_1',print_mapes=True,plot_fitted=True)
 ```
 
-## Export Results
+## Exporting Results
 - `Forecaster.export_to_df(which='top_1',save_csv=False,csv_name='forecast_results.csv')`
 - exports a forecast or forecasts to a pandas dataframe with future dates as the index and each exported forecast as a column
 - returns a pandas dataframe
