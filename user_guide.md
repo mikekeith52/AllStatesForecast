@@ -546,8 +546,6 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 ### forecast_prophet
 - `Forecaster.forecast_prophet(test_length=1,Xvars=None,call_me='prophet',**kwargs)`
 - Facebook Prophet: https://facebook.github.io/prophet/
-- Be sure no external regressors are reserved variable names ('y','ds','cap','floor',etc.)
-  - 'cap' and 'floor' can be added as keywords
 - Parameters:
   - **test_length** : int, default 1
     - the number of periods to holdout in order to test the model
