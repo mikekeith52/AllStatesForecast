@@ -31,6 +31,7 @@ class Forecaster:
             lasso (sklearn)
             mlp (multi level perceptron - sklearn)
             mlr (multi linear regression - sklearn)
+            prophet (facebook prophet - fbprophet)
             rf (random forest - sklearn)
             ridge (sklearn)
             svr (support vector regressor - sklearn)
@@ -747,6 +748,76 @@ class Forecaster:
             self.feature_importance[call_me]['pval'] = stats.t.sf(np.abs(self.feature_importance[call_me]['tvalue']), len(self.y)-1)*2 # https://stackoverflow.com/questions/17559897/python-p-value-from-t-statistic
         else:
             self.feature_importance.pop(call_me)
+
+    def forecast_prophet(self,test_length=1,Xvars=None,call_me='prophet',**kwargs):
+        """ Facebook Prophet
+            Parameters: test_length : int, default 1
+                            the number of periods to holdout in order to test the model
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list, "all", or None default None
+                            the independent variables to use in the resulting X dataframes
+                            "top_" not supported
+                        call_me : str, default "prophet"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        key words are passed to Prophet() function
+        """
+        from fbprophet import Prophet
+
+        self._ready_for_forecast()
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        self.info[call_me] = self._get_info_dict()
+        if not Xvars is None:
+            if Xvars == 'all':
+                X = pd.DataFrame(self.current_xreg)
+                X_f = pd.DataFrame(self.future_xreg)
+            elif isinstance(Xvars,list):
+                X = pd.DataFrame(self.current_xreg).loc[:,Xvars]
+                X_f = pd.DataFrame(self.future_xreg).loc[:,Xvars]
+            else:
+                raise ValueError(f'Xvars argument not recognized: {Xvars}')
+        else:
+            X = pd.DataFrame()
+            X_f = pd.DataFrame()
+
+        if 'cap' in kwargs:
+            X['cap'] = kwargs['cap']
+            X_f['cap'] = kwargs['cap']
+            kwargs.pop('cap')
+
+        if 'floor' in kwargs:
+            X['floor'] = kwargs['floor']
+            X_f['floor'] = kwargs['floor']
+            kwargs.pop('floor')
+
+        X['y'] = self.y
+        X['ds'] = self.current_dates
+        X_f['ds'] = self.future_dates
+
+        # train/test
+        model = Prophet(**kwargs)
+        for x in X.iloc[:,:-2].columns:
+            if x not in ('cap','floor'):
+                model.add_regressor(x)
+        model.fit(X.iloc[:-test_length])
+        test = model.predict(X.iloc[-test_length:])
+        self.info[call_me]['holdout_periods'] = test_length
+        self.info[call_me]['model_form'] = 'FB Prophet'
+        self.info[call_me]['test_set_actuals'] = X.iloc[-test_length:,-2].to_list()
+        self.info[call_me]['test_set_predictions'] = test['yhat']
+        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])]
+        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+
+        # forecast
+        model = Prophet(**kwargs)
+        for x in X.iloc[:,:-2].columns:
+            if x not in ('cap','floor'):
+                model.add_regressor(x)
+        model.fit(X)
+        pred = model.predict(X_f)
+        self.forecasts[call_me] = pred['yhat'].to_list()
+        if X.shape[1] > 2:
+            self.feature_importance[call_me] = pd.DataFrame(index=X.columns.to_list()[:-2])
 
     def forecast_sarimax13(self,test_length=1,start='auto',interval=12,Xvars=None,call_me='sarimax13',error='raise'):
         """ Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/

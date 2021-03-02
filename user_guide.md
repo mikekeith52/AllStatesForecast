@@ -54,8 +54,9 @@
 
 ## Initializing Objects
 
-- there are two ways to initialize a forecaster object
-  1. initialize empty and fill with FRED data:
+there are two ways to initialize a Forecaster object:  
+
+1. initialize empty and fill with FRED data through the pandas data-reader API:
 ```python
 from Forecaster import Forecaster
 f = Forecaster()
@@ -67,7 +68,8 @@ print(f.current_dates)
 print(f.name)
 >>> 'UTUR'
 ```
-  2. load data when initializing
+
+2. load data when initializing
 ```python
 from Forecaster import Forecaster
 f = Forecaster(y=[1,2,3,4,5],current_dates=pd.to_datetime(['2020-01-01','2020-02-01','2020-03-01','2020-04-01','2020-05-01']).to_list(),name='mydata')
@@ -179,6 +181,7 @@ print(f.forecast_out_periods)
   - [forecast_mlp()](#forecast_mlp)
   - [forecast_mlr()](#forecast_mlr)
   - [forecast_nnetar()](#forecast_nnetar)
+  - [forecast_prophet()](#forecast_prophet)
   - [forecast_rf()](#forecast_rf)
   - [forecast_ridge()](#forecast_ridge)
   - [forecast_sarimax13()](#forecast_sarimax13)
@@ -540,6 +543,31 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
+### forecast_prophet
+- `Forecaster.forecast_prophet(test_length=1,Xvars=None,call_me='prophet',**kwargs)`
+- Facebook Prophet: https://facebook.github.io/prophet/
+- Be sure no external regressors are reserved variable names ('y','ds','cap','floor',etc.)
+  - 'cap' and 'floor' can be added as keywords
+- Parameters:
+  - **test_length** : int, default 1
+    - the number of periods to holdout in order to test the model
+    - must be at least 1 (AssertionError raised if not)
+  - **Xvars** : list, "all", or None default None
+    - the independent variables to use in the resulting X dataframes
+    - "top_" not supported
+  - **call_me** : str, default "prophet"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - key words are passed to Prophet() function
+  - for logistic growth, you will need to add "cap" and/or "floor" variables to the keywords--they will not be passed to the Prophet() function
+```python
+f = Forecaster()
+f.get_data_fred('HOUSTNSA',date_start='1976-01-01')
+f.process_xreg_df(d,date_col='Date')
+f.forecast_prophet(test_length=12,Xvars='all')
+f.forecast_prophet(test_length=12,Xvars='all',call_me='prophet_logistic',growth='logistic',cap=200)
+f.forecast_prophet(test_length=12,call_me='prophet_no_vars')
+```
+
 ### forecast_sarimax13
 - `Forecaster.forecast_sarimax13(test_length=1,start='auto',interval=12,Xvars=None,call_me='sarimax13',error='raise')`
 - Seasonal Auto-Regressive Integrated Moving Average - ARIMA-X13 - https://www.census.gov/srd/www/x13as/  
@@ -839,10 +867,10 @@ print(f.best_model)
 
 ## Examples
 
-[Analysis 1](#analysis-1): Forecasting statewide indicators, using automatic adjustments for stationarity  
-[Analysis 2](#analysis-2): Forecasting statewide indicators, taking differences to account for stationarity  
-[Analysis 3](#analysis-3): Forecasting statewide indicators, using a dataframe of external regressors  
-[Analysis 4](#analysis-4): Forecasting different length series  
+[Analysis 1](#analysis-1): forecasting statewide indicators, using automatic adjustments for stationarity  
+[Analysis 2](#analysis-2): forecasting statewide indicators, taking differences to account for stationarity  
+[Analysis 3](#analysis-3): forecasting statewide indicators, using a dataframe of external regressors  
+[Analysis 4](#analysis-4): forecasting different length series  
 [Analysis 5](#analysis-5): three ways to auto-forecast seasonality  
 [Analysis 6](#analysis-6): using the same model with different parameters  
 [Analysis 7](#analysis-7): forecasting with a vecm  
