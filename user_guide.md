@@ -144,7 +144,7 @@ there are two ways to initialize a Forecaster object:
 
 - `Forecaster.process_xreg_df(xreg_df,date_col,process_columns=False)`
 - takes a dataframe of external regressors and ingests it into the object
-- any non-numeric data will be made into a 0/1 binary variable (using pandas.get_dummies(drop_first=True))
+- any non-numeric data will be made into a 0/1 binary variable (using `pandas.get_dummies(drop_first=True)`)
 - deals with columns with missing data
 - eliminates rows that don't correspond with self.y's timeframe
 - splits values between future and current observations
@@ -157,7 +157,7 @@ there are two ways to initialize a Forecaster object:
     - this should include only independent regressors either in numeric form or that can be dummied into a 1/0 variable as well as a date column that can be parsed by pandas
     - do not include the dependent variable value
   - **date_col** : str, requried
-    - the name of the date column in xreg_df that can be parsed with the pandas.to_datetime() function
+    - the name of the date column in xreg_df that can be parsed with the `pandas.to_datetime()` function
   - **process_columns** : str, dict, or False; optional
     - how to process columns with missing data - most forecasts will not run when missing data is present in either xreg dict
     - supported: {'remove','impute_mean','impute_median','impute_mode','impute_min','impute_max',impute_0','forward_fill','backward_fill','impute_random'}
