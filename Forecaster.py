@@ -823,6 +823,7 @@ class Forecaster:
                 model.add_regressor(x)
         model.fit(X)
         pred = model.predict(X_f)
+        self.info[call_me]['fitted_values'] = model.predict(X)['yhat'].to_list()
         self.forecasts[call_me] = pred['yhat'].to_list()
         if X.shape[1] > 2:
             self.feature_importance[call_me] = pd.DataFrame(index=X.columns.to_list()[:-2])
