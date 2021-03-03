@@ -222,7 +222,7 @@ print(f.forecast_out_periods)
 - this is meant for manual arima modeling; for a more automated implementation, see the forecast_auto_arima() and forecast_sarimax13() methods  
 - Parameters: 
   - **test_length** : int, default 1  
-    - the number of periods to holdout in order to test the model  
+    - the number of periods to hold out to test the model  
     - must be at least 1   
   - **Xvars** : list, "all", or None default None  
     - the independent variables to use in the resulting X dataframes  
@@ -241,7 +241,7 @@ print(f.forecast_out_periods)
 - does not search seasonal models  
 - Parameters: 
   - **test_length** : int, default 1
-      - the number of periods to holdout in order to test the model  
+      - the number of periods to hold out to test the model  
       - must be at least 1   
   - **Xvars** : list, "all", None, or starts with "top_", default None  
       - the independent variables used to make predictions  
@@ -285,7 +285,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - searches seasonal models, but the algorithm isn't as complex as forecast_auto_arima() and is harder to set up  
 - Parameters: 
   - **test_length** : int, default 1  
-    - the number of periods to holdout in order to test the model  
+    - the number of periods to hold out to test the model  
     - must be at least 1   
   - **start** : tuple of length 2 or "auto", default "auto"  
     - 1st element is the start year  
@@ -318,7 +318,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - for a more manual holt-winters application, see [forecast_hwes()](#forecast_hwes)  
 - Parameters: 
   - **test_length** : int, default 1  
-    - the number of periods to holdout in order to test the model  
+    - the number of periods to hold out to test the model  
     - must be at least 1   
   - **seasonal** : bool, default False  
     - whether there is seasonality in the series  
@@ -360,7 +360,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - this is an automated model selection  
 - Parameters: 
   - **test_length** : int, default 1  
-    - the number of periods to holdout in order to test the model  
+    - the number of periods to hold out to test the model  
     - must be at least 1 
   - **call_me** : str, default "ets"  
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
@@ -396,7 +396,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - if no keywords are added, this is almost always the same as a naive forecast that propogates the final value forward  
 - Parameters: 
   - **test_length** : int, default 1  
-    - the number of periods to holdout in order to test the model  
+    - the number of periods to hold out to test the model  
     - must be at least 1   
   - **call_me** : str, default "hwes"  
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
@@ -508,7 +508,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - this forecast does not work when there are negative or 0 values in the dependent variable  
 - Parameters: 
   - **test_length** : int, default 1  
-    - the number of periods to holdout in order to test the model  
+    - the number of periods to hold out to test the model  
     - must be at least 1   
   - **start** : tuple of length 2 or "auto", default "auto"  
     - 1st element is the start year  
@@ -548,7 +548,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - Facebook Prophet: https://facebook.github.io/prophet/
 - Parameters:
   - **test_length** : int, default 1
-    - the number of periods to holdout in order to test the model
+    - the number of periods to hold out to test the model
     - must be at least 1
   - **Xvars** : list, "all", or None default None
     - the independent variables to use in the resulting X dataframes
@@ -581,7 +581,7 @@ f.forecast_prophet(test_length=12,call_me='prophet_no_vars')
 - the model can fail for several other reasons (including lack of seasonality in the dependent variable)  
 - Parameters: 
   - **test_length** : int, default 1  
-      - the number of periods to holdout in order to test the model  
+      - the number of periods to hold out to test the model  
       - must be at least 1   
   - **start** : tuple of length 2 or "auto", default "auto"  
       - 1st element is the start year  
@@ -658,7 +658,7 @@ f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020
 - this is an automated model selection  
 - Parameters: 
   - **test_length** : int, default 1  
-    - the number of periods to holdout in order to test the model  
+    - the number of periods to hold out to test the model  
     - must be at least 1   
   - **season** : int or "NULL"  
     - the number of seasonal periods to consider (12 for monthly, etc.)  
