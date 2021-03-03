@@ -397,7 +397,7 @@ class Forecaster:
                             https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
         """
         self.future_dates = pd.date_range(start=self.current_dates[-1],periods=n+1,freq=freq).to_list()[1:]
-        self.forecast_out_periods = n
+        self.set_forecast_out_periods(n)
         
     def set_forecast_out_periods(self,n):
         """ sets the self.forecast_out_periods attribute and truncates self.future_dates and self.future_xreg if needed
@@ -409,8 +409,8 @@ class Forecaster:
         if isinstance(n,int):
             if n >= 1:
                 self.forecast_out_periods = n
-                if self.future_dates is None:
-                    raise ForecastFormatError('cannot set forecast_out_periods without a populated future_dates attribute, try using the generate_future_dates() method')
+                if (self.future_dates is None) | (n > len(self.future_dates)):
+                    raise ForecastFormatError(f'cannot set forecast_out_periods to {n} without a fully populated future_dates attribute--try using the generate_future_dates() method')
                 else:
                     self.future_dates = self.future_dates[:n]
                 if isinstance(self.future_xreg,dict):
