@@ -552,7 +552,9 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
     - must be at least 1 (AssertionError raised if not)
   - **Xvars** : list, "all", or None default None
     - the independent variables to use in the resulting X dataframes
-    - "top_" not supported
+    - if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
+    - "top" is determined through absolute value of the pearson correlation coefficient on the training set
+    - if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
   - **call_me** : str, default "prophet"
     - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
   - key words are passed to Prophet() function

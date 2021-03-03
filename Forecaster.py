@@ -754,9 +754,12 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
-                        Xvars : list, "all", or None default None
-                            the independent variables to use in the resulting X dataframes
-                            "top_" not supported
+                        Xvars : list, "all", None, or starts with "top_", default None
+                            the independent variables used to make predictions
+                            if it is a list, will attempt to estimate a model with that list of Xvars
+                            if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
+                            "top" is determined through absolute value of the pearson correlation coefficient on the training set
+                            if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
                         call_me : str, default "prophet"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         key words are passed to Prophet() function
@@ -774,6 +777,11 @@ class Forecaster:
             elif isinstance(Xvars,list):
                 X = pd.DataFrame(self.current_xreg).loc[:,Xvars]
                 X_f = pd.DataFrame(self.future_xreg).loc[:,Xvars]
+            elif Xvars.startswith('top_'):
+                nxreg = Xvars.split('_')[1]
+                self.set_ordered_xreg(chop_tail_periods=test_length)
+                X = pd.DataFrame(self.current_xreg).loc[:,self.ordered_xreg[:nxreg]]
+                X_f = pd.DataFrame(self.future_xreg).loc[:,self.ordered_xreg[:nxreg]]
             else:
                 raise ValueError(f'Xvars argument not recognized: {Xvars}')
         else:
@@ -809,10 +817,6 @@ class Forecaster:
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
 
         # forecast
-        model = Prophet(**kwargs)
-        for x in X.iloc[:,:-2].columns:
-            if x not in ('cap','floor'):
-                model.add_regressor(x)
         model.fit(X)
         pred = model.predict(X_f)
         self.forecasts[call_me] = pred['yhat'].to_list()
