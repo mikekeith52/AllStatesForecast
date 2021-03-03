@@ -778,7 +778,7 @@ class Forecaster:
                 X = pd.DataFrame(self.current_xreg).loc[:,Xvars]
                 X_f = pd.DataFrame(self.future_xreg).loc[:,Xvars]
             elif Xvars.startswith('top_'):
-                nxreg = Xvars.split('_')[1]
+                nxreg = int(Xvars.split('_')[1])
                 self.set_ordered_xreg(chop_tail_periods=test_length)
                 X = pd.DataFrame(self.current_xreg).loc[:,self.ordered_xreg[:nxreg]]
                 X_f = pd.DataFrame(self.future_xreg).loc[:,self.ordered_xreg[:nxreg]]
@@ -789,13 +789,13 @@ class Forecaster:
             X_f = pd.DataFrame()
 
         if 'cap' in kwargs:
-            X['cap'] = kwargs['cap']
-            X_f['cap'] = kwargs['cap']
+            X['cap'] = [kwargs['cap']]*len(self.y)
+            X_f['cap'] = [kwargs['cap']]*self.forecast_out_periods
             kwargs.pop('cap')
 
         if 'floor' in kwargs:
-            X['floor'] = kwargs['floor']
-            X_f['floor'] = kwargs['floor']
+            X['floor'] = [kwargs['floor']]*len(self.y)
+            X_f['floor'] = [kwargs['floor']]*self.forecast_out_periods
             kwargs.pop('floor')
 
         X['y'] = self.y
@@ -817,6 +817,10 @@ class Forecaster:
         self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
 
         # forecast
+        model = Prophet(**kwargs)
+        for x in X.iloc[:,:-2].columns:
+            if x not in ('cap','floor'):
+                model.add_regressor(x)
         model.fit(X)
         pred = model.predict(X_f)
         self.forecasts[call_me] = pred['yhat'].to_list()
