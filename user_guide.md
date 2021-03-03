@@ -549,7 +549,7 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
 - Parameters:
   - **test_length** : int, default 1
     - the number of periods to holdout in order to test the model
-    - must be at least 1 (AssertionError raised if not)
+    - must be at least 1
   - **Xvars** : list, "all", or None default None
     - the independent variables to use in the resulting X dataframes
     - if it begins with "top_", the character(s) after should be an int and will attempt to estimate a model with the top however many Xvars
