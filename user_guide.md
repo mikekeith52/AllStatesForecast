@@ -58,27 +58,37 @@
 there are two ways to initialize a Forecaster object:  
 
 1. initialize empty and fill with FRED data through the pandas data-reader API:
+- `Forecaster.get_data_fred(series,i=0,date_start='1900-01-01')`
+- imports data from FRED into a pandas dataframe
+- stores the results in self.name, self.y, and self.current_dates
+- Parameters: 
+  - **series** : str
+    - the name of the series to extract from FRED
+  - **i** : int, default 0
+    - the number of differences to take in the series to make it stationary
+  - **date_start** : str, default "1900-01-01"
+    - the date to begin the time series
+    - must be in YYYY-mm-dd format
 ```python
->>> from Forecaster import Forecaster
 >>> f = Forecaster()
 >>> f.get_data_fred('UTUR')
 >>> print(f.y)
 [5.8, 5.8, ..., 5.0, 4.1]
+
 >>> print(f.current_dates)
 [Timestamp('1976-01-01 00:00:00'), Timestamp('1976-02-01 00:00:00'), ..., Timestamp('2020-09-01 00:00:00'), Timestamp('2020-10-01 00:00:00')]
+
 >>>print(f.name)
 'UTUR'
 ```
 
 2. load data when initializing
-```python
->>> from Forecaster import Forecaster
->>> f = Forecaster(y=[1,2,3,4,5],current_dates=pd.to_datetime(['2020-01-01','2020-02-01','2020-03-01','2020-04-01','2020-05-01']).to_list(),name='mydata')
-```
+- `Forecaster.__init__(name=None,y=None,current_dates=None,future_dates=None,current_xreg=None,future_xreg=None,forecast_out_periods=24,**kwargs)`
 - pay attention to the required types! if it says list, it does not mean list-like (yet)
 - Parameters: 
   - **name** : str  
   - **y** : list  
+    - the figures that will be forecasted forward
   - **current_dates** : list  
     - an ordered list of dates that correspond to the ordered values in self.y  
     - elements must be able to be parsed by pandas as dates  
@@ -89,6 +99,10 @@ there are two ways to initialize a Forecaster object:
   - **future_xreg** : dict  
   - **forecast_out_periods** : int, default length of future_dates or 24 if that is None  
   - all keyword arguments become attributes
+```python
+>>> from Forecaster import Forecaster
+>>> f = Forecaster(y=[1,2,3,4,5],current_dates=pd.to_datetime(['2020-01-01','2020-02-01','2020-03-01','2020-04-01','2020-05-01']).to_list(),name='mydata')
+```
 
 ## Setting Forecast Periods
 
