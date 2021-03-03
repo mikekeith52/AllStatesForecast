@@ -58,21 +58,21 @@ there are two ways to initialize a Forecaster object:
 
 1. initialize empty and fill with FRED data through the pandas data-reader API:
 ```python
-from Forecaster import Forecaster
-f = Forecaster()
-f.get_data_fred('UTUR')
-print(f.y)
->>> [5.8, 5.8, ..., 5.0, 4.1]
-print(f.current_dates)
->>> [Timestamp('1976-01-01 00:00:00'), Timestamp('1976-02-01 00:00:00'), ..., Timestamp('2020-09-01 00:00:00'), Timestamp('2020-10-01 00:00:00')]
-print(f.name)
->>> 'UTUR'
+>>> from Forecaster import Forecaster
+>>> f = Forecaster()
+>>> f.get_data_fred('UTUR')
+>>> print(f.y)
+[5.8, 5.8, ..., 5.0, 4.1]
+>>> print(f.current_dates)
+[Timestamp('1976-01-01 00:00:00'), Timestamp('1976-02-01 00:00:00'), ..., Timestamp('2020-09-01 00:00:00'), Timestamp('2020-10-01 00:00:00')]
+>>>print(f.name)
+'UTUR'
 ```
 
 2. load data when initializing
 ```python
-from Forecaster import Forecaster
-f = Forecaster(y=[1,2,3,4,5],current_dates=pd.to_datetime(['2020-01-01','2020-02-01','2020-03-01','2020-04-01','2020-05-01']).to_list(),name='mydata')
+>>> from Forecaster import Forecaster
+>>> f = Forecaster(y=[1,2,3,4,5],current_dates=pd.to_datetime(['2020-01-01','2020-02-01','2020-03-01','2020-04-01','2020-05-01']).to_list(),name='mydata')
 ```
 - pay attention to the required types! if it says list, it does not mean list-like (yet)
 - Parameters: 
@@ -103,13 +103,13 @@ f = Forecaster(y=[1,2,3,4,5],current_dates=pd.to_datetime(['2020-01-01','2020-02
     - a pandas datetime freq value
     - https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#timeseries-offset-aliases
 ```python
-f = Forecaster()
-f.get_data_fred('UTUR')
-f.generate_future_dates(3,'MS')
-print(f.future_dates)
->>> [Timestamp('2020-11-01 00:00:00'), Timestamp('2020-12-01 00:00:00'), Timestamp('2021-01-01 00:00:00')]
-print(f.forecast_out_periods)
->>> 3
+>>> f = Forecaster()
+>>> f.get_data_fred('UTUR')
+>>> f.generate_future_dates(3,'MS')
+>>> print(f.future_dates)
+[Timestamp('2020-11-01 00:00:00'), Timestamp('2020-12-01 00:00:00'), Timestamp('2021-01-01 00:00:00')]
+>>> print(f.forecast_out_periods)
+3
 ```
 2. `Forecaster.set_forecast_out_periods(n)`
 - sets the self.forecast_out_periods attribute and truncates self.future_dates and self.future_xreg if needed
@@ -119,10 +119,10 @@ print(f.forecast_out_periods)
     - if this is a larger value than the size of the future_dates attribute, some models may fail
     - if this is a smaller value the the size of the future_dates attribute, future_xreg and future_dates will be truncated
 ```python
-f = Forecaster()
-f.get_data_fred('UTUR')
-f.generate_future_dates(12,'MS')
-f.set_forecast_out_periods(6) # reduces the forecast from 12 to 6 periods
+>>> f = Forecaster()
+>>> f.get_data_fred('UTUR')
+>>> f.generate_future_dates(12,'MS')
+>>> f.set_forecast_out_periods(6) # reduces the forecast from 12 to 6 periods
 ```
 
 ## Ingesting a DataFrame of External Regressors
@@ -150,20 +150,20 @@ f.set_forecast_out_periods(6) # reduces the forecast from 12 to 6 periods
     - if dict, key is a column and value is one of supported, method only applied to columns with missing data (so {'col1':'remove'} will not remove col1 unless there is missing data in it)               
     - 'impute_random' will fill in missing values with random draws from the same column
 ```python           
-xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
-f = Forecaster(y=[4,5,9],current_dates=pd.to_datetime(['2020-01-01','2020-02-01','2020-03-01']).to_list())
-f.process_xreg_df(xreg_df,date_col='date')
-print(f.current_xreg)
->>> {'x1':[1,2,3],'x2':[1,3,3]}
+>>> xreg_df = pd.DataFrame({'date':['2020-01-01','2020-02-01','2020-03-01','2020-04-01']},'x1':[1,2,3,5],'x2':[1,3,3,3])
+>>> f = Forecaster(y=[4,5,9],current_dates=pd.to_datetime(['2020-01-01','2020-02-01','2020-03-01']).to_list())
+>>> f.process_xreg_df(xreg_df,date_col='date')
+>>> print(f.current_xreg)
+{'x1':[1,2,3],'x2':[1,3,3]}
 
-print(f.future_xreg)
->>> {'x1':[5],'x2':[3]}
+>>> print(f.future_xreg)
+{'x1':[5],'x2':[3]}
 
-print(f.future_dates)
->>> [Timestamp('2020-04-01 00:00:00')]
+>>> print(f.future_dates)
+[Timestamp('2020-04-01 00:00:00')]
 
-print(f.forecast_out_periods)
->>> 1
+>>> print(f.forecast_out_periods)
+1
 ```
 
 ## Forecasting
@@ -255,27 +255,27 @@ print(f.forecast_out_periods)
   - **call_me** : str, default "auto_arima"
       - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
 ```python
-f = Forecaster()
-f.get_data_fred('UTUR')
-f.forecast_auto_arima(test_length=12,call_me='arima')
-print(f.info['arima'])
->>> {'holdout_periods': 12, 
->>> 'model_form': 'ARIMA(0,1,5)',
->>> 'test_set_actuals': [2.4, 2.4, ..., 5.0, 4.1],
->>> 'test_set_predictions': [2.36083282553252, 2.3119957980461803, ..., 2.09177057271149, 2.08127132827637], 
->>> 'test_set_ape': [0.0163196560281154, 0.03666841748076, ..., 0.581645885457702, 0.49237284676186205]}
-print(f.forecasts['arima'])
->>> [4.000616524942799, 4.01916650578768, ..., 3.7576542462753904, 3.7576542462753904]
+>>> f = Forecaster()
+>>> f.get_data_fred('UTUR')
+>>> f.forecast_auto_arima(test_length=12,call_me='arima')
+>>> print(f.info['arima'])
+{'holdout_periods': 12, 
+ 'model_form': 'ARIMA(0,1,5)',
+ 'test_set_actuals': [2.4, 2.4, ..., 5.0, 4.1],
+ 'test_set_predictions': [2.36083282553252, 2.3119957980461803, ..., 2.09177057271149, 2.08127132827637], 
+ 'test_set_ape': [0.0163196560281154, 0.03666841748076, ..., 0.581645885457702, 0.49237284676186205]}
+>>> print(f.forecasts['arima'])
+[4.000616524942799, 4.01916650578768, ..., 3.7576542462753904, 3.7576542462753904]
 
-print(f.mape['arima'])
->>> 0.4082393522799069
-print(f.feature_importance['arima']) # stored as a pandas dataframe
->>>     coef        se    tvalue          pval
->>> ma5  0.189706  0.045527  4.166858  3.598788e-05
->>> ma4 -0.032062  0.043873 -0.730781  4.652316e-01
->>> ma3 -0.060743  0.048104 -1.262753  2.072261e-01
->>> ma2 -0.257684  0.044522 -5.787802  1.213441e-08
->>> ma1  0.222933  0.042513  5.243861  2.265347e-07
+>>> print(f.mape['arima'])
+0.4082393522799069
+>>> print(f.feature_importance['arima']) # stored as a pandas dataframe
+    coef        se    tvalue          pval
+ma5  0.189706  0.045527  4.166858  3.598788e-05
+ma4 -0.032062  0.043873 -0.730781  4.652316e-01
+ma3 -0.060743  0.048104 -1.262753  2.072261e-01
+ma2 -0.257684  0.044522 -5.787802  1.213441e-08
+ma1  0.222933  0.042513  5.243861  2.265347e-07
 ```
 
 ### forecast_auto_arima_seas
@@ -560,12 +560,12 @@ print(f.feature_importance['arima']) # stored as a pandas dataframe
   - key words are passed to Prophet() function
   - for logistic growth, you will need to add "cap" and/or "floor" variables to the keywords--they will not be passed to the Prophet() function
 ```python
-f = Forecaster()
-f.get_data_fred('HOUSTNSA',date_start='1976-01-01')
-f.process_xreg_df(d,date_col='Date')
-f.forecast_prophet(test_length=12,Xvars='all')
-f.forecast_prophet(test_length=12,Xvars='all',call_me='prophet_logistic',growth='logistic',cap=200)
-f.forecast_prophet(test_length=12,call_me='prophet_no_vars')
+>>> f = Forecaster()
+>>> f.get_data_fred('HOUSTNSA',date_start='1976-01-01')
+>>> f.process_xreg_df(d,date_col='Date')
+>>> f.forecast_prophet(test_length=12,Xvars='all')
+>>> f.forecast_prophet(test_length=12,Xvars='all',call_me='prophet_logistic',growth='logistic',cap=200)
+>>> f.forecast_prophet(test_length=12,call_me='prophet_no_vars')
 ```
 
 ### forecast_sarimax13
@@ -626,8 +626,8 @@ f.forecast_prophet(test_length=12,call_me='prophet_no_vars')
   - **call_me** : str
     - the model nickname
 ```python
-f.forecast_splice(models=['arima','tbats'],periods=(datetime.datetime(2020,1,1),)) # one splice in january 2020
-f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020,1,1),datetime.datetime(2020,3,1))) # two splices in january and march 2020, respectively
+>>> f.forecast_splice(models=['arima','tbats'],periods=(datetime.datetime(2020,1,1),)) # one splice in january 2020
+>>> f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020,1,1),datetime.datetime(2020,3,1))) # two splices in january and march 2020, respectively
 ```
 
 ### forecast_svr
@@ -777,10 +777,10 @@ f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020
   - **print_mapes** : bool, default False  
     - whether to print the MAPEs to the console of the models being plotted  
 ```python
-f.plot()
-f.plot(models=['arima','tbats'])
-f.plot(models='top_4')
-f.plot(models='top_1',print_mapes=True,plot_fitted=True)
+>>> f.plot()
+>>> f.plot(models=['arima','tbats'])
+>>> f.plot(models='top_4')
+>>> f.plot(models='top_1',print_mapes=True,plot_fitted=True)
 ```
 
 ## Exporting Results
@@ -801,10 +801,10 @@ f.plot(models='top_1',print_mapes=True,plot_fitted=True)
     - default pd.to_csv() called (comma delimited)
     - you can use this to change where the file is saved by specifying the file path
 ```python
-results_df = f.export_to_df(which=['auto_arima','nnetar']) # no csv file will be written, but a pandas dataframe is stored in results_df
-f.export_to_df(which='top_1',save_csv=True) # saves top model as a csv to the working directory as forecast_results.csv
-f.export_to_df(which='top_2',save_csv=True,csv_name = 'C:/NotWorkingDirectory/top_2_forecast_results.csv') # saves csv to a different directory
-results_df = f.export_to_df(which='all',save_csv=True,csv_name = '../OtherParentDirectory/all_forecast_results.csv') # returns pandas dataframe and saves csv to a different directory
+>>> results_df = f.export_to_df(which=['auto_arima','nnetar']) # no csv file will be written, but a pandas dataframe is stored in results_df
+>>> f.export_to_df(which='top_1',save_csv=True) # saves top model as a csv to the working directory as forecast_results.csv
+>>> f.export_to_df(which='top_2',save_csv=True,csv_name = 'C:/NotWorkingDirectory/top_2_forecast_results.csv') # saves csv to a different directory
+>>> results_df = f.export_to_df(which='all',save_csv=True,csv_name = '../OtherParentDirectory/all_forecast_results.csv') # returns pandas dataframe and saves csv to a different directory
 ```
 
 ## Everything Else
@@ -822,17 +822,17 @@ results_df = f.export_to_df(which='all',save_csv=True,csv_name = '../OtherParent
     - the model to forecast
   - key words passed to the model arguments
 ```python
-models = ('ets','tbats','auto_arima')
-for m in models:
-  f.forecast(m,test_length=3)
+>>> models = ('ets','tbats','auto_arima')
+>>> for m in models:
+>>>   f.forecast(m,test_length=3)
 ```
 
 ### order_all_forecasts_best_to_worst
 - `Forecaster.order_all_forecasts_best_to_worst()`
 - returns a list of the evaluated models for the given series in order of best-to-worst according to their evaluated MAPE values
 ```python
-print(f.order_all_forecasts_best_to_worst)
->>> ['tbats','ets','auto_arima']
+>>> print(f.order_all_forecasts_best_to_worst)
+['tbats','ets','auto_arima']
 ```
 
 ### pop
@@ -843,16 +843,16 @@ print(f.order_all_forecasts_best_to_worst)
     - if str, that model will be popped
     - if not str, must be an iterable where elements are model nicknames stored in the object
 ```python
-f = Forecaster()
-f.get_data_fred('UTUR')
-f.forecast_auto_arima()
-f.pop('auto_arima')
-print(f.forecasts)
->>> {}
-print(f.info)
->>> {}
-print(f.mape)
->>> {}
+>>> f = Forecaster()
+>>> f.get_data_fred('UTUR')
+>>> f.forecast_auto_arima()
+>>> f.pop('auto_arima')
+>>> print(f.forecasts)
+{}
+>>> print(f.info)
+{}
+>>> print(f.mape)
+{}
 ```
 
 ### set_best_model
@@ -860,9 +860,9 @@ print(f.mape)
 - sets the best forecast model based on which model has the lowest MAPE value for the given holdout periods
 - if two or more models tie, it will select whichever one was evaluated first
 ```python
-f.set_best_model()
-print(f.best_model)
->>> 'auto_arima'
+>>> f.set_best_model()
+>>> print(f.best_model)
+'auto_arima'
 ```
 
 ## Examples
