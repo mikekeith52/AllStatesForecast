@@ -47,6 +47,7 @@
       - 'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
       - 'fitted_values' : list - the model's fitted values, when available. if not available, None
   - in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
+    - only mape is created by default, but other error metrics can be created with the create_error_metric() method
   - in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
   - in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features' prediction power
     - if it is an sklearn model, it will be permutation feature importance from the eli5 package (https://eli5.readthedocs.io/en/latest/blackbox/permutation_importance.html)
@@ -774,7 +775,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - See [Analysis 7](#analysis-7) for an example of how to run a vector error correction model
 
 ## Plotting
-- `Forecaster.plot(models='all',plot_fitted=False,print_model_form=False,print_mapes=False)`
+- `Forecaster.plot(models='all',metric='mape',plot_fitted=False,print_model_form=False,print_metric=False)`
 - Plots time series results of the stored forecasts  
 - All models plotted in order of best-to-worst mapes  
 - Parameters: 
@@ -786,11 +787,13 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **plot_fitted** : bool, default False  
     - whether you want each model's fitted values plotted on the graph as a light dashed line  
     - only works when graphing one model at a time (ignored otherwise)  
-    - this may not be available for some models  
+    - this may not be available for some models
+  - **metric** : one of {'mape','rmse','mae','r2'}
+    - the error/accuracy metric to consider
   - **print_model_form** : bool, default False  
     - whether to print the model form to the console of the models being plotted  
-  - **print_mapes** : bool, default False  
-    - whether to print the MAPEs to the console of the models being plotted  
+  - **print_metric** : bool, default False  
+    - whether to print the metric specified in metric to the console of the models being plotted 
 ```python
 >>> f.plot()
 >>> f.plot(models=['arima','tbats'])
@@ -799,17 +802,19 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 ```
 
 ## Exporting Results
-- `Forecaster.export_to_df(which='top_1',save_csv=False,csv_name='forecast_results.csv')`
+- `Forecaster.export_to_df(which='top_1',save_csv=False,metric='mape',csv_name='forecast_results.csv')`
 - exports a forecast or forecasts to a pandas dataframe with future dates as the index and each exported forecast as a column
 - returns a pandas dataframe
 - will fail if you attempt to export forecasts of varying lengths
-- by default, exports the best evaluated model by MAPE
+- by default, exports the best evaluated model by MAPE, but the metric and number of models can be specified
 - Parameters: 
   - **which** : starts with "top_", "all", or list; default "top_1"
     - which forecasts to export
     - if a list, should be a list of model nicknames
   - **save_csv** : bool, default False
     - whether to save the dataframe to a csv file in the current directory
+  - **metric** : one of {'mape','rmse','mae','r2'}
+    - the metric to use to evaluate best models
   - **csv_name** : str, default "forecat_results.csv"
     - the name of the csv file to be written out
     - ignored if save_csv is False
@@ -824,10 +829,27 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ## Everything Else
 
+[create_error_metric](#create_error_metric)
 [forecast()](#forecast)  
 [order_all_forecasts_best_to_worst()](#order_all_forecasts_best_to_worst)  
 [pop()](#pop)  
 [set_best_model()](#set_best_model)  
+
+### create_error_metric
+- `Forecaster.create_error_metric(which='rmse')`
+- creates a new error metric to apply to all models
+- stores the 
+- Paramaters: 
+  - **which** : one of {rmse,mae,r2}
+```python
+>>> print(f.mape)
+{'ets': 0.2,
+'tbats': 0.3}
+>>> f.create_error_metric('rmse')
+>>> print(f.rmse)
+{'ets': 3.2,
+'tbats': 4.1}
+```
 
 ### forecast
 - `Forecaster.forecast(which,**kwargs)`
@@ -844,7 +866,10 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ### order_all_forecasts_best_to_worst
 - `Forecaster.order_all_forecasts_best_to_worst()`
-- returns a list of the evaluated models for the given series in order of best-to-worst according to their evaluated MAPE values
+- returns a list of the evaluated models for the given series in order of best-to-worst according to the selected metric on the test set
+- Paramaters: 
+  - **metric** : one of {'mape','rmse','mae','r2'}
+    - the error/accuracy metric to consider
 ```python
 >>> print(f.order_all_forecasts_best_to_worst)
 ['tbats','ets','auto_arima']
@@ -872,10 +897,14 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ### set_best_model
 - `Forecaster.set_best_model()`
-- sets the best forecast model based on which model has the lowest MAPE value for the given holdout periods
+- sets the best forecast model based on which model has the best error metric value for the given holdout periods
 - if two or more models tie, it will select whichever one was evaluated first
+- Paramaters: 
+  - **metric** : one of {'mape','rmse','mae','r2'}
+                            the error/accuracy metric to consider
 ```python
->>> f.set_best_model()
+>>> f.create_error_metric('rmse')
+>>> f.set_best_model(metric='rmse')
 >>> print(f.best_model)
 'auto_arima'
 ```

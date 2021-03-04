@@ -51,6 +51,7 @@ class Forecaster:
                         'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
                         'fitted_values' : list - the model's fitted values, when available. if not available, None
                 in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
+                    only mape is created by default, but other error metrics can be created with the create_error_metric() method
                 in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
                 in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features' prediction power
                     if it is an sklearn model, it will be permutation feature importance from the eli5 package (https://eli5.readthedocs.io/en/latest/blackbox/permutation_importance.html)
@@ -2224,18 +2225,43 @@ class Forecaster:
             start = end
         self.forecasts[call_me][start:] = self.forecasts[models[-1]][start:]
 
-    def set_best_model(self):
-        """ sets the best forecast model based on which model has the lowest MAPE value for the given holdout periods
-            if two or more models tie, it will select whichever one was evaluated first
+    def create_error_metric(self,which='rmse'):
+        """ Paramaters: which : one of {rmse,mae,r2}
+                            the error/accuracy metric to create based on the test set--will be applied to all evaluated models
+                            call after evaluating all models
+                            creates an attribute with the same name in the model
         """
-        self.best_model = Counter(self.mape).most_common()[-1][0]
+        if which == 'rmse':
+            self.rmse = {m:np.mean([(y - yhat)**2 for y,yhat in zip(self.info[m].test_set_predictions,self.info[m].test_set_actuals)])^0.5 for m in self.info.keys()}
+        elif which == 'mae':
+            self.mae = {m:np.mean([np.abs(y - yhat) for y,yhat in zip(self.info[m].test_set_predictions,self.info[m].test_set_actuals)]) for m in self.info.keys()}
+        elif which == 'r2':
+            self.r2 = {m:pearsonr(self.info[m].test_set_predictions,self.info[m].test_set_actuals)[0]**2 for m in self.info.keys()}
+        else:
+            raise ValueError(f'which argument: {which} not recognized; only rmse, mae, and r2 supported')
 
-    def order_all_forecasts_best_to_worst(self):
-        """ returns a list of the evaluated models for the given series in order of best-to-worst according to their evaluated MAPE values
-            using different-sized test sets for different models could cause some trouble here, but I don't see a better way
+
+    def set_best_model(self,metric='mape'):
+        """ sets the best forecast model based on which model has the best error metric value for the given holdout periods
+            if two or more models tie, it will select whichever one was evaluated first
+            Paramaters: metric : one of {'mape','rmse','mae','r2'}
+                            the error/accuracy metric to consider
         """
-        x = [h[0] for h in Counter(self.mape).most_common()]
-        return x[::-1] # reversed copy of the list
+        if metric != 'r2':
+            self.best_model = Counter(getattr(self,metric)).most_common()[-1][0]
+        else:
+            self.best_model = Counter(getattr(self,metric)).most_common()[0][0]
+
+    def order_all_forecasts_best_to_worst(self,metric='mape'):
+        """ returns a list of the evaluated models for the given series in order of best-to-worst according to the selected metric on the test set
+            Paramaters: metric : one of {'mape','rmse','mae','r2'}
+                            the error/accuracy metric to consider
+        """
+        x = [h[0] for h in Counter(getattr(self,metric)).most_common()]
+        if metric == 'r2':
+            return x
+        else:
+            return x[::-1] # reversed copy of the list
 
     def pop(self,which):
         """ deletes a forecast or list of forecasts from the object
@@ -2273,7 +2299,7 @@ class Forecaster:
         """
         self.plot(**kwargs)
 
-    def plot(self,models='all',plot_fitted=False,print_model_form=False,print_mapes=False):
+    def plot(self,models='all',metric='mape',plot_fitted=False,print_model_form=False,print_metric=False):
         """ Plots time series results of the stored forecasts
             All models plotted in order of best-to-worst mapes
             Parameters: models : list, "all", or starts with "top_"; default "all"
@@ -2285,10 +2311,12 @@ class Forecaster:
                             whether you want each model's fitted values plotted on the graph as a light dashed line
                             only works when graphing one model at a time (ignored otherwise)
                             this may not be available for some models
+                        metric : one of {'mape','rmse','mae','r2'}
+                            the error/accuracy metric to consider
                         print_model_form : bool, default False
                             whether to print the model form to the console of the models being plotted
-                        print_mapes : bool, default False
-                            whether to print the MAPEs to the console of the models being plotted
+                        print_metric : bool, default False
+                            whether to print the metric specified in metric to the console of the models being plotted
         """
         import matplotlib.pyplot as plt
         import seaborn as sns
@@ -2308,13 +2336,13 @@ class Forecaster:
         else:
             raise ValueError(f'models must be list or str, got {type(models)}')
 
-        if (print_model_form) | (print_mapes):
+        if (print_model_form) | (print_metric):
             for m in plot_these_models:
                 print_text = '{} '.format(m)
                 if print_model_form:
                     print_text += "model form: {} ".format(self.info[m]['model_form'])
-                if print_mapes:
-                    print_text += "{}-period test-set MAPE: {} ".format(self.info[m]['holdout_periods'],self.mape[m])
+                if print_metric:
+                    print_text += "{}-period test-set MAPE: {} ".format(self.info[m]['holdout_periods'],getattr(self,metric[m]))
                 print(print_text)
 
         # plots with dates if dates are available, else plots with ambiguous integers
@@ -2335,7 +2363,7 @@ class Forecaster:
         plt.title(f'{self.name} Forecast Results')
         plt.show()
 
-    def export_to_df(self,which='top_1',save_csv=False,csv_name='forecast_results.csv'):
+    def export_to_df(self,which='top_1',save_csv=False,metric='mape',csv_name='forecast_results.csv'):
         """ exports a forecast or forecasts to a pandas dataframe with future dates as the index and each exported forecast as a column
             returns a pandas dataframe
             will fail if you attempt to export forecasts of varying lengths
@@ -2345,6 +2373,8 @@ class Forecaster:
                             if a list, should be a list of model nicknames
                         save_csv : bool, default False
                             whether to save the dataframe to a csv file in the current directory
+                        metric : one of {'mape','rmse','mae','r2'}
+                            the metric to use to evaluate best models
                         csv_name : str, default "forecat_results.csv"
                             the name of the csv file to be written out
                             ignored if save_csv is False
@@ -2356,11 +2386,11 @@ class Forecaster:
         df = pd.DataFrame(index=self.future_dates)
         if isinstance(which,str):
             if (which == 'all') | (which.startswith('top_') & (int(which.split('_')[1]) > len(self.forecasts.keys()))):
-                for m in self.order_all_forecasts_best_to_worst()[:]:
+                for m in self.order_all_forecasts_best_to_worst(metric)[:]:
                     df[m] = self.forecasts[m]
             elif which.startswith('top_'):
                 top = int(which.split('_')[1])
-                for m in self.order_all_forecasts_best_to_worst()[:top]:
+                for m in self.order_all_forecasts_best_to_worst(metric)[:top]:
                     df[m] = self.forecasts[m]
             else:
                 raise ValueError(f'which argument not supported: {which}')
