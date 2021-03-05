@@ -234,7 +234,11 @@ class Forecaster:
         self.mape[call_me] = np.mean(self.info[call_me]['test_set_ape'])
         self.rmse[call_me] = np.mean([(y - yhat)**2 for y,yhat in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])**0.5
         self.mae[call_me] = np.mean([np.abs(y - yhat) for y,yhat in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])
-        self.r2[call_me] = stats.pearsonr(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])[0]**2
+        # r2 needs at least 2 observations to work, so test_length = 1 will not evaluate
+        if len(self.info[call_me]['test_set_predictions']) > 1:
+            self.r2[call_me] = stats.pearsonr(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])[0]**2
+        else:
+            self.r2[call_me] = None
 
     def _ready_for_forecast(self,need_xreg=False):
         """ runs before each attempted to forecast to make sure:
@@ -2228,9 +2232,9 @@ class Forecaster:
         self.info[call_me]['model_form'] = "Splice of {}; splice point(s): {}".format(', '.join([k for k in self.info if k in models]), ', '.join([v.strftime('%Y-%m-%d') for v in periods]))
         self.forecasts[call_me] = [None]*self.forecast_out_periods
 
-        for kw in kwargs:
+        for kw,v in kwargs.items():
             if kw in ('mape','rmse','mae','r2'):
-                setattr(self,kw,float(kwargs[kw])) 
+                getattr(self,kw)[call_me] = v 
             else:
                 raise ValueError(f'keyword {kw} not recognized!')
         
