@@ -47,7 +47,9 @@
       - 'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
       - 'fitted_values' : list - the model's fitted values, when available. if not available, None
   - in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
-    - only mape is created by default, but other error metrics can be created with the create_error_metric() method
+  - in self.rmse (dict), a key is added as the model name and the Root Mean Square Error as the value
+  - in self.mae (dict), a key is added as the model name and the Mean Absolute Error as the value
+  - in self.r2 (dict), a key is added as the model name and the R Squared as the value
   - in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
   - in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features' prediction power
     - if it is an sklearn model, it will be permutation feature importance from the eli5 package (https://eli5.readthedocs.io/en/latest/blackbox/permutation_importance.html)
@@ -627,7 +629,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
 ### forecast_splice
-- `Forecaster.forecast_splice(models,periods,force_mape=None,call_me='splice')`
+- `Forecaster.forecast_splice(models,periods,call_me='splice',**kwargs)`
 - splices multiple forecasts together
 - this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
 - Parameters: 
@@ -637,10 +639,9 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - each date represents a splice
       - model[0] --> :periods[0]
       - models[-1] --> periods[-1]:
-  - **force_mape** : float, default None
-    - since some class methods will fail if mape isn't numeric, you can force a numeric mape value here
   - **call_me** : str
     - the model nickname
+  - key words should be the name of a metric ('mape','rmse','mae','r2') and a numeric value as the argument since some functions don't evaluate without numeric metrics
 ```python
 >>> f.forecast_splice(models=['arima','tbats'],periods=(datetime.datetime(2020,1,1),)) # one splice in january 2020
 >>> f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020,1,1),datetime.datetime(2020,3,1))) # two splices in january and march 2020, respectively
@@ -788,7 +789,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - whether you want each model's fitted values plotted on the graph as a light dashed line  
     - only works when graphing one model at a time (ignored otherwise)  
     - this may not be available for some models
-  - **metric** : one of {'mape','rmse','mae','r2'}
+  - **metric** : one of {'mape','rmse','mae','r2'}, default 'mape'
     - the error/accuracy metric to consider
   - **print_model_form** : bool, default False  
     - whether to print the model form to the console of the models being plotted  
@@ -813,7 +814,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - if a list, should be a list of model nicknames
   - **save_csv** : bool, default False
     - whether to save the dataframe to a csv file in the current directory
-  - **metric** : one of {'mape','rmse','mae','r2'}
+  - **metric** : one of {'mape','rmse','mae','r2'}, default 'mape'
     - the metric to use to evaluate best models
   - **csv_name** : str, default "forecat_results.csv"
     - the name of the csv file to be written out
@@ -829,27 +830,10 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ## Everything Else
 
-[create_error_metric](#create_error_metric)
 [forecast()](#forecast)  
 [order_all_forecasts_best_to_worst()](#order_all_forecasts_best_to_worst)  
 [pop()](#pop)  
 [set_best_model()](#set_best_model)  
-
-### create_error_metric
-- `Forecaster.create_error_metric(which='rmse')`
-- creates a new error metric to apply to all models
-- stores the 
-- Paramaters: 
-  - **which** : one of {rmse,mae,r2}
-```python
->>> print(f.mape)
-{'ets': 0.2,
-'tbats': 0.3}
->>> f.create_error_metric('rmse')
->>> print(f.rmse)
-{'ets': 3.2,
-'tbats': 4.1}
-```
 
 ### forecast
 - `Forecaster.forecast(which,**kwargs)`
@@ -865,10 +849,10 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 ```
 
 ### order_all_forecasts_best_to_worst
-- `Forecaster.order_all_forecasts_best_to_worst()`
+- `Forecaster.order_all_forecasts_best_to_worst(metric='mape')`
 - returns a list of the evaluated models for the given series in order of best-to-worst according to the selected metric on the test set
 - Paramaters: 
-  - **metric** : one of {'mape','rmse','mae','r2'}
+  - **metric** : one of {'mape','rmse','mae','r2'}, default 'mape'
     - the error/accuracy metric to consider
 ```python
 >>> print(f.order_all_forecasts_best_to_worst)
@@ -896,11 +880,11 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 ```
 
 ### set_best_model
-- `Forecaster.set_best_model()`
+- `Forecaster.set_best_model(metric='mape')`
 - sets the best forecast model based on which model has the best error metric value for the given holdout periods
 - if two or more models tie, it will select whichever one was evaluated first
 - Paramaters: 
-  - **metric** : one of {'mape','rmse','mae','r2'}
+  - **metric** : one of {'mape','rmse','mae','r2'}, default 'mape'
                             the error/accuracy metric to consider
 ```python
 >>> f.create_error_metric('rmse')

@@ -51,7 +51,9 @@ class Forecaster:
                         'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
                         'fitted_values' : list - the model's fitted values, when available. if not available, None
                 in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
-                    only mape is created by default, but other error metrics can be created with the create_error_metric() method
+                in self.rmse (dict), a key is added as the model name and the Root Mean Square Error as the value
+                in self.mae (dict), a key is added as the model name and the Mean Absolute Error as the value
+                in self.r2 (dict), a key is added as the model name and the R Squared as the value
                 in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
                 in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features' prediction power
                     if it is an sklearn model, it will be permutation feature importance from the eli5 package (https://eli5.readthedocs.io/en/latest/blackbox/permutation_importance.html)
@@ -85,6 +87,9 @@ class Forecaster:
         self.forecast_out_periods = forecast_out_periods if future_dates is None else len(future_dates)
         self.info = {}
         self.mape = {}
+        self.rmse = {}
+        self.mae = {}
+        self.r2 = {}
         self.forecasts = {}
         self.feature_importance = {}
         self.ordered_xreg = None
@@ -112,7 +117,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = list(pred)
         self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
-        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self._metrics(call_me)
         regr.fit(X,y)
         new_data = pd.DataFrame(self.future_xreg)
         if isinstance(Xvars,list):
@@ -222,6 +227,14 @@ class Forecaster:
 
     def _get_info_dict(self):
         return dict.fromkeys(['holdout_periods','model_form','test_set_actuals','test_set_predictions','test_set_ape','fitted_values'])
+
+    def _metrics(self,call_me):
+        """ creates mape, rmse, mae, and r2
+        """
+        self.mape[call_me] = np.mean(self.info[call_me]['test_set_ape'])
+        self.rmse[call_me] = np.mean([(y - yhat)**2 for y,yhat in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])**0.5
+        self.mae[call_me] = np.mean([np.abs(y - yhat) for y,yhat in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])
+        self.r2[call_me] = stats.pearsonr(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])[0]**2
 
     def _ready_for_forecast(self,need_xreg=False):
         """ runs before each attempted to forecast to make sure:
@@ -602,7 +615,6 @@ class Forecaster:
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
         tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
 
-        self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = list(tmp_forecast['forecast'])
         
         self.info[call_me]['holdout_periods'] = test_length
@@ -610,6 +622,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
         self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
@@ -734,7 +747,6 @@ class Forecaster:
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
         tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
 
-        self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = list(tmp_forecast['forecast'])
         
         self.info[call_me]['holdout_periods'] = test_length
@@ -742,6 +754,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
         self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
@@ -813,9 +826,9 @@ class Forecaster:
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['model_form'] = 'FB Prophet'
         self.info[call_me]['test_set_actuals'] = X.iloc[-test_length:,-2].to_list()
-        self.info[call_me]['test_set_predictions'] = test['yhat']
+        self.info[call_me]['test_set_predictions'] = test['yhat'].to_list()
         self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])]
-        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self._metrics(call_me)
 
         # forecast
         model = Prophet(**kwargs)
@@ -961,7 +974,6 @@ class Forecaster:
 
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
-        self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = tmp_forecast['forecast'].to_list()
     
         self.info[call_me]['holdout_periods'] = test_length
@@ -969,6 +981,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
         self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self._metrics(call_me)
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
     def forecast_arima(self,test_length=1,Xvars=None,order=(0,0,0),seasonal_order=(0,0,0,0),trend=None,call_me='arima',**kwargs):
@@ -1026,7 +1039,7 @@ class Forecaster:
         self.info[call_me]['test_set_predictions'] = pred
         self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
 
-        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self._metric()
 
         arima = ARIMA(y,exog=X,order=order,seasonal_order=seasonal_order,trend=trend,dates=dates,**kwargs).fit()
         self.info[call_me]['fitted_values'] = list(arima.fittedvalues)
@@ -1068,7 +1081,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
         self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
-        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self._metrics(call_me)
 
         hwes = HWES(y,dates=dates,**kwargs).fit(optimized=True,use_brute=True)
         self.info[call_me]['fitted_values'] = list(hwes.fittedvalues)
@@ -1152,7 +1165,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
         self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
-        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self._metrics(call_me)
 
         hwes = HWES(y,dates=dates,initialization_method='estimated',**best_params).fit(optimized=True,use_brute=True)
         self.info[call_me]['fitted_values'] = list(hwes.fittedvalues)
@@ -1311,8 +1324,6 @@ class Forecaster:
         tmp_test_results = pd.read_csv('tmp/tmp_test_results.csv')
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
         tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
-
-        self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = list(tmp_forecast['forecast'])
         
         self.info[call_me]['holdout_periods'] = test_length
@@ -1320,6 +1331,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
         self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
         self.feature_importance[call_me] = pd.DataFrame(index=pd.read_csv('tmp/tmp_r_current.csv').iloc[:,1:].columns.to_list())
         if self.feature_importance[call_me].shape[0] == 0:
@@ -1379,7 +1391,6 @@ class Forecaster:
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
         tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
 
-        self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = tmp_forecast['forecast'].to_list()
         
         self.info[call_me]['holdout_periods'] = test_length
@@ -1387,6 +1398,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
         self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
 
     def forecast_ets(self,test_length=1,call_me='ets'):
@@ -1440,7 +1452,6 @@ class Forecaster:
         tmp_forecast = pd.read_csv('tmp/tmp_forecast.csv')
         tmp_fitted = pd.read_csv('tmp/tmp_fitted.csv')
 
-        self.mape[call_me] = tmp_test_results['APE'].mean()
         self.forecasts[call_me] = tmp_forecast['forecast'].to_list()
         
         self.info[call_me]['holdout_periods'] = test_length
@@ -1448,6 +1459,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
         self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
+        self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
 
     def forecast_var(self,*series,auto_resize=False,test_length=1,Xvars=None,lag_ic='AIC',optimizer='AIC',season='NULL',max_externals=None,call_me='var'):
@@ -1658,7 +1670,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
         self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
-        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self._metrics(call_me)
         self.forecasts[call_me] = tmp_forecast.iloc[:,0].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
@@ -1875,7 +1887,7 @@ class Forecaster:
         self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
         self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
-        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self._metrics(call_me)
         self.forecasts[call_me] = tmp_forecast.iloc[:,0].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
@@ -2117,11 +2129,11 @@ class Forecaster:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
 
-    def forecast_average(self,models='all',exclude=None,call_me='average',test_length='max'):
+    def forecast_average(self,models='all',exclude=None,metric='mape',call_me='average',test_length='max'):
         """ averages a set of models to make a new estimator
             Parameters: models : list, "all", or starts with "top_", default "all"
                             "all" will average all models
-                            starts with "top_" will average the top however many models are specified according to their respective MAPE values on the test set (lower = better)
+                            starts with "top_" will average the top however many models are specified according to their respective metric values on the test set
                                 the character after "top_" must be an integer
                                 ex. "top_5"
                             if list, then those are the models that will be averaged
@@ -2129,6 +2141,7 @@ class Forecaster:
                             manually exlcude some models
                             all models passed here will be excluded
                             if models parameters starts with "top" and one of those top models is in the list passed to exclude, that model will be excluded, and the other however many will be averaged (so you might only get 3 models averaged if you pass "top_4" for example)
+                        metric : one of {'mape','rmse','mae','r2'}, default 'mape'
                         call_me : str, default "average"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         test_length : int or "max", default "max"
@@ -2139,12 +2152,12 @@ class Forecaster:
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         if models == 'all':
-            avg_these_models = [e for e in list(self.mape.keys()) if (e != call_me) & (not e is None)]
+            avg_these_models = [e for e in list(getattr(self,metric).keys()) if (e != call_me) & (not e is None)]
         elif isinstance(models,list):
             avg_these_models = models[:]
         elif isinstance(models,str):
             if models.startswith('top_'):
-                ordered_models = [e for e in self.order_all_forecasts_best_to_worst() if (e != call_me) & (not e is None)]
+                ordered_models = [e for e in self.order_all_forecasts_best_to_worst(metric) if (e != call_me) & (not e is None)]
                 avg_these_models = [m for i, m in enumerate(ordered_models) if (i+1) <= int(models.split('_')[1])]
         else:
             raise ValueError(f'argument in models parameter not recognized: {models}')
@@ -2187,10 +2200,10 @@ class Forecaster:
         self.info[call_me]['model_form'] = 'Average of ' + str(len(avg_these_models)) + ' models: ' + ', '.join(avg_these_models)
         self.info[call_me]['test_set_predictions'] = list(test_set_predictions_df.mean(axis=1))
         self.info[call_me]['test_set_ape'] = list(test_set_ape_df.mean(axis=1))
-        self.mape[call_me] = np.array(self.info[call_me]['test_set_ape']).mean()
+        self._metrics(call_me)
         self.forecasts[call_me] = list(forecasts.mean(axis=1))
 
-    def forecast_splice(self,models,periods,force_mape=None,call_me='splice'):
+    def forecast_splice(self,models,periods,call_me='splice',**kwargs):
         """ splices multiple forecasts together
             this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
             Parameters: models : list
@@ -2199,10 +2212,9 @@ class Forecaster:
                             each date represents a splice
                                 model[0] --> :periods[0]
                                 models[-1] --> periods[-1]:
-                        force_mape : float, default None
-                            since some class methods will fail if mape isn't numeric, you can force a numeric mape value here
                         call_me : str
                             the model nickname
+                        key words should be the name of a metric ('mape','rmse','mae','r2') and a numeric value as the argument since some functions don't evaluate without numeric metrics
             >>> f.forecast_splice(models=['arima','tbats'],periods=(datetime.datetime(2020,1,1),))
         """
         assert isinstance(models,list), 'models must be a list'
@@ -2214,8 +2226,13 @@ class Forecaster:
 
         self.info[call_me] = self._get_info_dict()
         self.info[call_me]['model_form'] = "Splice of {}; splice point(s): {}".format(', '.join([k for k in self.info if k in models]), ', '.join([v.strftime('%Y-%m-%d') for v in periods]))
-        self.mape[call_me] = force_mape if force_mape is None else float(force_mape)
         self.forecasts[call_me] = [None]*self.forecast_out_periods
+
+        for kw in kwargs:
+            if kw in ('mape','rmse','mae','r2'):
+                setattr(self,kw,float(kwargs[kw])) 
+            else:
+                raise ValueError(f'keyword {kw} not recognized!')
         
         # splice
         start = 0
@@ -2225,33 +2242,17 @@ class Forecaster:
             start = end
         self.forecasts[call_me][start:] = self.forecasts[models[-1]][start:]
 
-    def create_error_metric(self,which='rmse'):
-        """ Paramaters: which : one of {rmse,mae,r2}
-                            the error/accuracy metric to create based on the test set--will be applied to all evaluated models
-                            call after evaluating all models
-                            creates an attribute with the same name in the model
-        """
-        if which == 'rmse':
-            self.rmse = {m:np.mean([(y - yhat)**2 for y,yhat in zip(self.info[m]['test_set_predictions'],self.info[m]['test_set_actuals'])])**0.5 for m in self.info.keys()}
-        elif which == 'mae':
-            self.mae = {m:np.mean([np.abs(y - yhat) for y,yhat in zip(self.info[m]['test_set_predictions'],self.info[m]['test_set_actuals'])]) for m in self.info.keys()}
-        elif which == 'r2':
-            self.r2 = {m:stats.pearsonr(self.info[m]['test_set_predictions'],self.info[m]['test_set_actuals'])[0]**2 for m in self.info.keys()}
-        else:
-            raise ValueError(f'which argument: {which} not recognized; only rmse, mae, and r2 supported')
-
-
     def set_best_model(self,metric='mape'):
         """ sets the best forecast model based on which model has the best error metric value for the given holdout periods
             if two or more models tie, it will select whichever one was evaluated first
-            Paramaters: metric : one of {'mape','rmse','mae','r2'}
+            Paramaters: metric : one of {'mape','rmse','mae','r2'}, default 'mape'
                             the error/accuracy metric to consider
         """
         self.best_model = self.order_all_forecasts_best_to_worst(metric)[0]
 
     def order_all_forecasts_best_to_worst(self,metric='mape'):
         """ returns a list of the evaluated models for the given series in order of best-to-worst according to the selected metric on the test set
-            Paramaters: metric : one of {'mape','rmse','mae','r2'}
+            Paramaters: metric : one of {'mape','rmse','mae','r2'}, default 'mape'
                             the error/accuracy metric to consider
         """
         x = [h[0] for h in Counter(getattr(self,metric)).most_common()]
