@@ -2232,11 +2232,11 @@ class Forecaster:
                             creates an attribute with the same name in the model
         """
         if which == 'rmse':
-            self.rmse = {m:np.mean([(y - yhat)**2 for y,yhat in zip(self.info[m].test_set_predictions,self.info[m].test_set_actuals)])^0.5 for m in self.info.keys()}
+            self.rmse = {m:np.mean([(y - yhat)**2 for y,yhat in zip(self.info[m]['test_set_predictions'],self.info[m]['test_set_actuals'])])**0.5 for m in self.info.keys()}
         elif which == 'mae':
-            self.mae = {m:np.mean([np.abs(y - yhat) for y,yhat in zip(self.info[m].test_set_predictions,self.info[m].test_set_actuals)]) for m in self.info.keys()}
+            self.mae = {m:np.mean([np.abs(y - yhat) for y,yhat in zip(self.info[m]['test_set_predictions'],self.info[m]['test_set_actuals'])]) for m in self.info.keys()}
         elif which == 'r2':
-            self.r2 = {m:pearsonr(self.info[m].test_set_predictions,self.info[m].test_set_actuals)[0]**2 for m in self.info.keys()}
+            self.r2 = {m:stats.pearsonr(self.info[m]['test_set_predictions'],self.info[m]['test_set_actuals'])[0]**2 for m in self.info.keys()}
         else:
             raise ValueError(f'which argument: {which} not recognized; only rmse, mae, and r2 supported')
 
@@ -2247,10 +2247,7 @@ class Forecaster:
             Paramaters: metric : one of {'mape','rmse','mae','r2'}
                             the error/accuracy metric to consider
         """
-        if metric != 'r2':
-            self.best_model = Counter(getattr(self,metric)).most_common()[-1][0]
-        else:
-            self.best_model = Counter(getattr(self,metric)).most_common()[0][0]
+        self.best_model = self.order_all_forecasts_best_to_worst(metric)[0]
 
     def order_all_forecasts_best_to_worst(self,metric='mape'):
         """ returns a list of the evaluated models for the given series in order of best-to-worst according to the selected metric on the test set
@@ -2342,7 +2339,7 @@ class Forecaster:
                 if print_model_form:
                     print_text += "model form: {} ".format(self.info[m]['model_form'])
                 if print_metric:
-                    print_text += "{}-period test-set MAPE: {} ".format(self.info[m]['holdout_periods'],getattr(self,metric[m]))
+                    print_text += "{}-period test-set {}: {} ".format(self.info[m]['holdout_periods'],metric,getattr(self,metric)[m])
                 print(print_text)
 
         # plots with dates if dates are available, else plots with ambiguous integers
