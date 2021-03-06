@@ -6,6 +6,7 @@ import pandas_datareader as pdr
 from collections import Counter
 from scipy import stats
 import rpy2.robjects as ro
+from sklearn.metrics import r2_score
 
 # make the working directory friendly for R
 rwd = os.getcwd().replace('\\','/')
@@ -232,11 +233,11 @@ class Forecaster:
         """ creates mape, rmse, mae, and r2
         """
         self.mape[call_me] = np.mean(self.info[call_me]['test_set_ape'])
-        self.rmse[call_me] = np.mean([(y - yhat)**2 for y,yhat in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])**0.5
-        self.mae[call_me] = np.mean([np.abs(y - yhat) for y,yhat in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])
+        self.rmse[call_me] = np.mean([(y - yhat)**2 for yhat,y in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])**0.5
+        self.mae[call_me] = np.mean([np.abs(y - yhat) for yhat,y in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])
         # r2 needs at least 2 observations to work, so test_length = 1 will not evaluate
         if len(self.info[call_me]['test_set_predictions']) > 1:
-            self.r2[call_me] = stats.pearsonr(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])[0]**2
+            self.r2[call_me] = r2_score(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])
         else:
             self.r2[call_me] = None
 
