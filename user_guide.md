@@ -855,7 +855,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **metric** : one of {'mape','rmse','mae','r2'}, default 'mape'
     - the error/accuracy metric to consider
 ```python
->>> print(f.order_all_forecasts_best_to_worst)
+>>> print(f.order_all_forecasts_best_to_worst())
 ['tbats','ets','auto_arima']
 ```
 
@@ -887,7 +887,6 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **metric** : one of {'mape','rmse','mae','r2'}, default 'mape'
                             the error/accuracy metric to consider
 ```python
->>> f.create_error_metric('rmse')
 >>> f.set_best_model(metric='rmse')
 >>> print(f.best_model)
 'auto_arima'
