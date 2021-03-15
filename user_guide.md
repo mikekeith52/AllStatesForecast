@@ -9,7 +9,7 @@
 [Forecasting](#forecasting)  
 [Plotting](#plotting)  
 [Exporting Results](#exporting-results)  
-[View Forecast Stats](#view-forecast-stats)
+[View Forecast Stats](#view-forecast-stats)  
 [Everything Else](#everything-else)  
 [Examples](#examples)  
 
