@@ -2407,3 +2407,84 @@ class Forecaster:
             df.to_csv(csv_name)
 
         return df
+
+    def vomit(self,csv_file_name='forecast_info.csv',order_by=None,global_df=True,global_df_name='forecast_info_df',if_exists='replace',**kwargs):
+        """ outputs stats about each forecast and saves to a csv file, can also create a global dataframe in the environment with the info
+            works with loops of other forecasted series
+            Parameters: csv_file_name : str, default 'forecast_info.csv'
+                            what to call the saved csv file
+                        order_by : one of {None,'mpae','rmse','mae','r2'}, default None
+                            the metric to sort the result by
+                        global_df : bool, default True
+                            whether to create a pandas dataframe global in the environment
+                        gobal_df_name : str, default 'forecast_info_df'
+                            the name of the resulting global pandas dataframe
+                            irrelevant if global_df is False
+                        if_exists : one of {'replace','append','error'}, default 'replace'
+                            what to do if either the csv file or the global df already exists
+                            'replace' replaces it/them
+                            'append' appends to it/them
+                            'error' raises an error
+                        keywords are columns and corresponding values to also add to the dataframe
+        """
+        df = pd.DataFrame()
+        for f in self.forecasts.keys():
+            append = {
+                'name':[self.name],
+                'nobs':[len(self.y)],
+                'model':[self.info[f]['model_form']],
+                'holdout_periods':[len(self.info[f]['test_set_actuals'])],
+                'covariates':[self.feature_importance[f].index if f in self.feature_importance.keys() else None],
+                'test_set_mape':[self.mape],
+                'test_set_rmse':[self.rmse],
+                'test_set_mae':[self.mae],
+                'test_set_r2':[self.r2],
+                'last_actual_test_value':[self.info[f]['test_set_actuals'][-1]],
+                'last_predicted_test_value':[self.info[f]['test_set_predictions'][-1]]
+            }
+
+            for k,v in kwargs:
+                append[k] = [v]
+
+            df = df.append(append,ignore_index=True,sort=False)
+
+        if order_by in ('mape','rmse','mae','r2'):
+            if order_by != 'r2':
+                df.sort_values(order_by,inplace=True)
+            else:
+                df.sort_values(order_by,ascending=False,inplace=True)
+        elif not order_by is None:
+            raise ValueError(f'argument passed to order_by not recognized: {order_by}')
+
+        if if_exists != 'replace':
+            if global_df:
+                if global_df_name in globals():
+                    if if_exists == 'append':
+                        globals()[global_df_name] = pd.concat([globals()[global_df_name],df])
+                    elif if_exists == 'error':
+                        raise KeyError(f'already exists global: {global_df_name} in environment')
+                    else:
+                        raise ValueError(f'argument passed to if_exists not recognized: {if_exists}')
+                else:
+                    globals()[global_df_name] = df
+            if os.path.exists(csv_file_name):
+                if if_exists == 'append':
+                    with open(csv_file_name,'a') as fil:
+                        append = []
+                        for i, v in df.iterrows():
+                            for c in df:
+                                if ',' in v[c]:
+                                    append.append(f'"{v[c]}"')
+                                else:
+                                    append.append(v[c])
+                            fil.append(','.join(append) + '\n')
+                elif if_exists == 'error':
+                    raise PermissionError(f'file already exists: {csv_file_name}')
+                else:
+                    raise ValueError(f'argument passed to if_exists not recognized: {if_exists}')
+            else:
+                df.to_csv(csv_file_name,index=False)
+        else:
+            globals()[global_df_name] = df
+            df.to_csv(csv_file_name,index=False)
+
