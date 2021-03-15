@@ -2444,7 +2444,6 @@ class Forecaster:
                 'last_actual_test_value':[self.info[f]['test_set_actuals'][-1]],
                 'is_best_model':[1 if self.best_model == f else 0]
             }
-
             for k,v in kwargs.items():
                 append[k] = [v]
             df = df.append(pd.DataFrame(append),ignore_index=True,sort=False)

@@ -9,6 +9,7 @@
 [Forecasting](#forecasting)  
 [Plotting](#plotting)  
 [Exporting Results](#exporting-results)  
+[View Forecast Stats](#view-forecast-stats)
 [Everything Else](#everything-else)  
 [Examples](#examples)  
 
@@ -827,6 +828,18 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 >>> f.export_to_df(which='top_2',save_csv=True,csv_name = 'C:/NotWorkingDirectory/top_2_forecast_results.csv') # saves csv to a different directory
 >>> results_df = f.export_to_df(which='all',save_csv=True,csv_name = '../OtherParentDirectory/all_forecast_results.csv') # returns pandas dataframe and saves csv to a different directory
 ```
+
+## View Forecast Stats
+- `Forecaster.vomit(order_by=None,spliced_models='skip',**kwargs)`
+- outputs stats about each forecast and returns a pandas dataframe
+- Parameters: 
+  - order_by : one of {None,'mpae','rmse','mae','r2'}, default None
+    - the metric to sort the result by
+  - spliced_models : one of {'skip','error'}
+    - what to do with spliced models since they don't have the same stats/info as other models
+    - 'skip' skips them
+    - 'error' raises an error
+  - keywords are columns and corresponding values to also add to the dataframe
 
 ## Everything Else
 
