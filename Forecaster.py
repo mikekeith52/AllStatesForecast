@@ -511,9 +511,9 @@ class Forecaster:
         self.ordered_xreg = [h[0] for h in k.most_common()] # this should give us the ranked external regressors
 
     def forecast(self,which,**kwargs):
-    	""" forecasts with a str method to allow for loops
-    	"""
-    	getattr(self,'forecast_'+which)(**kwargs)
+        """ forecasts with a str method to allow for loops
+        """
+        getattr(self,'forecast_'+which)(**kwargs)
 
     def forecast_auto_arima(self,test_length=1,Xvars=None,call_me='auto_arima'):
         """ Auto-Regressive Integrated Moving Average 
@@ -2325,17 +2325,17 @@ class Forecaster:
         import seaborn as sns
         if isinstance(models,str):
             if models == 'all':
-                plot_these_models = self.order_all_forecasts_best_to_worst()[:]
+                plot_these_models = self.order_all_forecasts_best_to_worst(metric)[:]
             elif models.startswith('top_'):
                 top = int(models.split('_')[1])
                 if top > len(self.forecasts.keys()):
-                    plot_these_models = self.order_all_forecasts_best_to_worst()[:]
+                    plot_these_models = self.order_all_forecasts_best_to_worst(metric)[:]
                 else:
-                    plot_these_models = self.order_all_forecasts_best_to_worst()[:top]
+                    plot_these_models = self.order_all_forecasts_best_to_worst(metric)[:top]
             else:
                 raise ValueError(f'models argument not supported: {models}')
         elif isinstance(models,list):
-            plot_these_models = [m for m in self.order_all_forecasts_best_to_worst() if m in models]
+            plot_these_models = [m for m in self.order_all_forecasts_best_to_worst(metric) if m in models]
         else:
             raise ValueError(f'models must be list or str, got {type(models)}')
 
@@ -2408,83 +2408,52 @@ class Forecaster:
 
         return df
 
-    def vomit(self,csv_file_name='forecast_info.csv',order_by=None,global_df=True,global_df_name='forecast_info_df',if_exists='replace',**kwargs):
-        """ outputs stats about each forecast and saves to a csv file, can also create a global dataframe in the environment with the info
-            works with loops of other forecasted series
-            Parameters: csv_file_name : str, default 'forecast_info.csv'
-                            what to call the saved csv file
-                        order_by : one of {None,'mpae','rmse','mae','r2'}, default None
+    def vomit(self,order_by=None,spliced_models='skip',**kwargs):
+        """ outputs stats about each forecast and returns a pandas dataframe
+            Parameters: order_by : one of {None,'mpae','rmse','mae','r2'}, default None
                             the metric to sort the result by
-                        global_df : bool, default True
-                            whether to create a pandas dataframe global in the environment
-                        gobal_df_name : str, default 'forecast_info_df'
-                            the name of the resulting global pandas dataframe
-                            irrelevant if global_df is False
-                        if_exists : one of {'replace','append','error'}, default 'replace'
-                            what to do if either the csv file or the global df already exists
-                            'replace' replaces it/them
-                            'append' appends to it/them
+                        spliced_models : one of {'skip','error'}
+                            what to do with spliced models since they don't have the same stats/info as other models
+                            'skip' skips them
                             'error' raises an error
                         keywords are columns and corresponding values to also add to the dataframe
         """
         df = pd.DataFrame()
         for f in self.forecasts.keys():
+            if self.info[f]['model_form'].startswith('Splice'):
+                if spliced_models == 'skip':
+                    continue
+                elif spliced_models == 'error':
+                    raise TypeError('cannot write stats for spliced models')
+                else:
+                    raise ValueError(f'spliced_models argument not recognized: {spliced_models}')
             append = {
                 'name':[self.name],
+                'series_start_date':[self.current_dates[0]],
+                'series_end_date':[self.current_dates[-1]],
                 'nobs':[len(self.y)],
-                'model':[self.info[f]['model_form']],
+                'model_nickname':[f],
+                'model_form':[self.info[f]['model_form']],
+                'covariates':[self.feature_importance[f].index.to_list() if f in self.feature_importance.keys() else None],
                 'holdout_periods':[len(self.info[f]['test_set_actuals'])],
-                'covariates':[self.feature_importance[f].index if f in self.feature_importance.keys() else None],
-                'test_set_mape':[self.mape],
-                'test_set_rmse':[self.rmse],
-                'test_set_mae':[self.mae],
-                'test_set_r2':[self.r2],
+                'test_set_mape':[self.mape[f]],
+                'test_set_rmse':[self.rmse[f]],
+                'test_set_mae':[self.mae[f]],
+                'test_set_r2':[self.r2[f]],
+                'last_predicted_test_value':[self.info[f]['test_set_predictions'][-1]],
                 'last_actual_test_value':[self.info[f]['test_set_actuals'][-1]],
-                'last_predicted_test_value':[self.info[f]['test_set_predictions'][-1]]
+                'is_best_model':[1 if self.best_model == f else 0]
             }
 
-            for k,v in kwargs:
+            for k,v in kwargs.items():
                 append[k] = [v]
-
-            df = df.append(append,ignore_index=True,sort=False)
-
-        if order_by in ('mape','rmse','mae','r2'):
-            if order_by != 'r2':
-                df.sort_values(order_by,inplace=True)
+            df = df.append(pd.DataFrame(append),ignore_index=True,sort=False)
+        if not order_by is None:
+            if order_by == 'r2':
+                df.sort_values('test_set_r2',ascending=False,inplace=True)
+            elif order_by in ('mape','rmse','mae'):
+                df.sort_values('test_set_' + order_by,inplace=True)
             else:
-                df.sort_values(order_by,ascending=False,inplace=True)
-        elif not order_by is None:
-            raise ValueError(f'argument passed to order_by not recognized: {order_by}')
+                raise ValueError(f'order_by argument not recognized: {order_by}')
 
-        if if_exists != 'replace':
-            if global_df:
-                if global_df_name in globals():
-                    if if_exists == 'append':
-                        globals()[global_df_name] = pd.concat([globals()[global_df_name],df])
-                    elif if_exists == 'error':
-                        raise KeyError(f'already exists global: {global_df_name} in environment')
-                    else:
-                        raise ValueError(f'argument passed to if_exists not recognized: {if_exists}')
-                else:
-                    globals()[global_df_name] = df
-            if os.path.exists(csv_file_name):
-                if if_exists == 'append':
-                    with open(csv_file_name,'a') as fil:
-                        append = []
-                        for i, v in df.iterrows():
-                            for c in df:
-                                if ',' in v[c]:
-                                    append.append(f'"{v[c]}"')
-                                else:
-                                    append.append(v[c])
-                            fil.append(','.join(append) + '\n')
-                elif if_exists == 'error':
-                    raise PermissionError(f'file already exists: {csv_file_name}')
-                else:
-                    raise ValueError(f'argument passed to if_exists not recognized: {if_exists}')
-            else:
-                df.to_csv(csv_file_name,index=False)
-        else:
-            globals()[global_df_name] = df
-            df.to_csv(csv_file_name,index=False)
-
+        return df
