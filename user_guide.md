@@ -833,7 +833,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - `Forecaster.vomit(order_by=None,spliced_models='skip',**kwargs)`
 - outputs stats about each forecast and returns a pandas dataframe
 - Parameters: 
-  - order_by : one of {None,'mpae','rmse','mae','r2'}, default None
+  - order_by : one of {None,'mape','rmse','mae','r2'}, default None
     - the metric to sort the result by
   - spliced_models : one of {'skip','error'}
     - what to do with spliced models since they don't have the same stats/info as other models
