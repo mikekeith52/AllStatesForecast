@@ -840,6 +840,44 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - 'skip' skips them
     - 'error' raises an error
   - keywords are columns and corresponding values to also add to the dataframe
+```python
+>>> forecast_stats = f.vomit(order_by='mape')
+>>> print(forecast_stats.head())
+       name series_start_date series_end_date  nobs model_nickname  \
+0  HOUSTNSA        1976-01-01      2021-01-01   541        prophet   
+1  HOUSTNSA        1976-01-01      2021-01-01   541     auto_arima   
+4  HOUSTNSA        1976-01-01      2021-01-01   541        average   
+3  HOUSTNSA        1976-01-01      2021-01-01   541      auto_hwes   
+2  HOUSTNSA        1976-01-01      2021-01-01   541      sarimax13   
+
+                                          model_form  \
+0                                         FB Prophet   
+1                                       ARIMA(5,1,4)   
+4  Average of 3 models: prophet, auto_arima, auto...   
+3  Holt-Winters Exponential Smoothing {'trend':...   
+2                           ARIMA-X13 (0 1 1)(0 1 1)   
+
+                                          covariates  holdout_periods  \
+0  [UTUR, JHDUSRGDPBR, JHDUSRGDPBR_lag_1, JHDUSRG...               12   
+1      [ma4, ma3, ma2, ma1, ar5, ar4, ar3, ar2, ar1]               12   
+4                                               None               12   
+3  [smoothing_level, smoothing_trend, smoothing_s...               12   
+2  [Weekday, AO2020.Apr, MA-Nonseasonal-01, MA-Se...               12   
+
+   test_set_mape  test_set_rmse  test_set_mae  test_set_r2  \
+0       0.080154      11.368312      9.144009     0.647496   
+1       0.106603      15.373208     10.755213    -5.403219   
+4       0.120083      13.545920      9.968191    -1.125668   
+3       0.173491      24.601304     17.535054    -1.447114   
+2       0.214543      29.733218     22.278129    -2.738030   
+
+   last_predicted_test_value  last_actual_test_value  is_best_model  
+0                 119.096241                   109.5              1  
+1                 115.648625                   109.5              0  
+4                 112.259333                   109.5              0  
+3                 102.033134                   109.5              0  
+2                 114.570111                   109.5              0  
+```
 
 ## Everything Else
 
