@@ -781,7 +781,7 @@ class Forecaster:
                             if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
                         call_me : str, default "prophet"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-                        key words are passed to Prophet() function
+                        keywords are passed to Prophet() function
         """
         from fbprophet import Prophet
 
@@ -1064,7 +1064,7 @@ class Forecaster:
                         call_me : str, default "hwes"
                             the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
                         keywords are passed to the ExponentialSmoothing function from statsmodels -- `dates` is specified automatically
-                        some important parameters to specify as key words: trend, damped_trend, seasonal, seasonal_periods, use_boxcox
+                        some important parameters to specify as keywords: trend, damped_trend, seasonal, seasonal_periods, use_boxcox
             ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
         """
         from statsmodels.tsa.holtwinters import ExponentialSmoothing as HWES
@@ -2219,7 +2219,7 @@ class Forecaster:
                                 models[-1] --> periods[-1]:
                         call_me : str
                             the model nickname
-                        key words should be the name of a metric ('mape','rmse','mae','r2') and a numeric value as the argument since some functions don't evaluate without numeric metrics
+                        keywords should be the name of a metric ('mape','rmse','mae','r2') and a numeric value as the argument since some functions don't evaluate without numeric metrics
             >>> f.forecast_splice(models=['arima','tbats'],periods=(datetime.datetime(2020,1,1),))
         """
         assert isinstance(models,list), 'models must be a list'
@@ -2400,6 +2400,7 @@ class Forecaster:
             raise ValueError(f'models must be list or str, got {type(models)}')
 
         if isinstance(include_train,int):
+            assert include_train > 1, 'include_train must be greater than 1'
             actuals = self.y[-include_train:]
             full_dates = self.current_dates[-include_train:]
         elif isinstance(include_train,bool):
