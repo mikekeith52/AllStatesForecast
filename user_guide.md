@@ -777,15 +777,15 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - See [Analysis 7](#analysis-7) for an example of how to run a vector error correction model
 
 ## Plotting
-- `Forecaster.plot(models='all',metric='mape',plot_fitted=False,print_model_form=False,print_metric=False)`
+1. `Forecaster.plot(models='all',metric='mape',plot_fitted=False,print_model_form=False,print_metric=False)`
 - Plots time series results of the stored forecasts  
 - All models plotted in order of best-to-worst mapes  
 - Parameters: 
-  - **models** : list, "all", or starts with "top_"; default "all"  
-    - the models you want plotted  
-    - if "all" plots all models  
-    - if list type, plots all models in the list  
-    - if starts with "top_" reads the next character(s) as the top however models you want plotted (based on lowest MAPE values)  
+  - **models** : list, "all", or starts with "top_"; default "all"
+    - the models to be plotted
+    - if "all": plots all models
+    - if list: plots all models in the list
+    - if starts with "top_": reads the next character(s) as the top however models you want plotted (based on metric specified in metric) 
   - **plot_fitted** : bool, default False  
     - whether you want each model's fitted values plotted on the graph as a light dashed line  
     - only works when graphing one model at a time (ignored otherwise)  
@@ -801,6 +801,30 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 >>> f.plot(models=['arima','tbats'])
 >>> f.plot(models='top_4')
 >>> f.plot(models='top_1',print_mapes=True,plot_fitted=True)
+```
+2. `Forecaster.plot_test(models='all',metric='mape',include_train=True)`
+- Plots the test predictions from each specified model
+- Parameters: 
+  - **models** : list, "all", or starts with "top_"; default "all"
+    - the models to be plotted
+    - if "all": plots all models
+    - if list: plots all models in the list
+    - if starts with "top_": reads the next character(s) as the top however models you want plotted (based on metric specified in metric)
+  - **metric** : one of {'mape','rmse','mae','r2'}
+    - the error/accuracy metric to consider
+  - **include_train** : bool or int, default True
+    - if bool: whether to include the full training set in the plot or just the part that corresponds with the test predictions
+    - if int: the last number of actual observations to include in the plot
+    - if you plot models with different test lengths, graphs might appear distorted
+```python
+>>> f.forecast_auto_arima(test_length=12)
+>>> f.forecast_auto_hwes(test_length=12)
+>>> f.forecast_auto_arima_seas(test_length=12)
+>>> f.forecast_prophet(test_length=12)
+>>> f.plot_test() # plots all models with entire train set history
+>>> f.plot_test(models=['auto_arima','prophet']) # plots the arima and prophet models with the entire history of the train set
+>>> f.plot_test(models='top_3',include_train=24) # plots the top 3 models based on mape with the last 24 observations in the train set
+>>> f.plot_test(models='top_1',metric='mae',include_train=False) # plots only the test set results of the best model based on mae
 ```
 
 ## Exporting Results
@@ -1142,7 +1166,7 @@ def save_info_about_other_series(trgt_obj,from_obj,pos=1,call_me='vecm'):
   trgt_obj.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(trgt_obj.y[(-test_length):],tmp_test_results.iloc[:,pos])]
   trgt_obj.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
   trgt_obj.info[call_me]['fitted_values'] = None
-  trgt_obj.mape[call_me] = np.array(trgt_obj.info[call_me]['test_set_ape']).mean()
+  trgt_obj._metrics(call_me)
   trgt_obj.forecasts[call_me] = tmp_forecast.iloc[:,pos].to_list()
   
   if call_me in from_obj.feature_importance.keys():

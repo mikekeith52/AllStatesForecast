@@ -1077,7 +1077,7 @@ class Forecaster:
         y = pd.Series(self.y)
         y_train = y.values[:-test_length]
         y_test = y.values[-test_length:]
-        dates = pd.to_datetime(self.current_dates) if not self.current_dates is None else None
+        dates = self.current_dates[:]
 
         hwes_train = HWES(y_train,dates=dates,**kwargs).fit(optimized=True,use_brute=True)
         pred = list(hwes_train.predict(start=len(y_train),end=len(y)-1))
@@ -1134,7 +1134,7 @@ class Forecaster:
         y = pd.Series(self.y)
         y_train = y.values[:-test_length]
         y_test = y.values[-test_length:]
-        dates = pd.to_datetime(self.current_dates)
+        dates = self.current_dates[:]
 
         scores = [] # lower is better
         if y.min() > 0:
@@ -2307,9 +2307,9 @@ class Forecaster:
             All models plotted in order of best-to-worst mapes
             Parameters: models : list, "all", or starts with "top_"; default "all"
                             the models you want plotted
-                            if "all" plots all models
-                            if list type, plots all models in the list
-                            if starts with "top_" reads the next character(s) as the top however models you want plotted (based on lowest MAPE values)
+                            if "all": plots all models
+                            if list: plots all models in the list
+                            if starts with "top_": reads the next character(s) as the top however models you want plotted (based on metric specified in metric)
                         plot_fitted : bool, default False
                             whether you want each model's fitted values plotted on the graph as a light dashed line
                             only works when graphing one model at a time (ignored otherwise)
@@ -2359,6 +2359,68 @@ class Forecaster:
             if plot_fitted & (not self.info[m]['fitted_values'] is None) & (len(plot_these_models) == 1):
                 sns.lineplot(x=self.current_dates,y=self.info[m]['fitted_values'],style=True,dashes=[(2,2)],hue=.5)
                 labels.append(f'{m} fitted values')
+
+        plt.legend(labels=labels,loc='best')
+        plt.xlabel('Date')
+        plt.ylabel('{}'.format(self.name if not self.name is None else ''))
+        plt.title(f'{self.name} Forecast Results')
+        plt.show()
+
+    def plot_test(self,models='all',metric='mape',include_train=True):
+        """ plots the test predictions from each specified model
+            Parameters: models : list, "all", or starts with "top_"; default "all"
+                            the models you want plotted
+                            if "all": plots all models
+                            if list: plots all models in the list
+                            if starts with "top_": reads the next character(s) as the top however models you want plotted (based on metric specified in metric)
+                        metric : one of {'mape','rmse','mae','r2'}
+                            the error/accuracy metric to consider
+                        include_train : bool or int, default True
+                            if bool: whether to include the full training set in the plot or just the part that corresponds with the test predictions
+                            if int: the last number of actual observations to include in the plot
+                            if you plot models with different test lengths, graphs might appear distorted
+        """
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        if isinstance(models,str):
+            if models == 'all':
+                plot_these_models = self.order_all_forecasts_best_to_worst(metric)[:]
+            elif models.startswith('top_'):
+                top = int(models.split('_')[1])
+                if top > len(self.forecasts.keys()):
+                    plot_these_models = self.order_all_forecasts_best_to_worst(metric)[:]
+                else:
+                    plot_these_models = self.order_all_forecasts_best_to_worst(metric)[:top]
+            else:
+                raise ValueError(f'models argument not supported: {models}')
+        elif isinstance(models,list):
+            plot_these_models = [m for m in self.order_all_forecasts_best_to_worst(metric) if m in models]
+        else:
+            raise ValueError(f'models must be list or str, got {type(models)}')
+
+        if isinstance(include_train,int):
+            actuals = self.y[-include_train:]
+            full_dates = self.current_dates[-include_train:]
+        elif isinstance(include_train,bool):
+            if include_train:
+                actuals = self.y
+                full_dates = self.current_dates
+            else:
+                actuals = self.info[plot_these_models[0]]['test_set_actuals']
+                full_dates = self.current_dates[-len(actuals):]
+        else:
+            raise ValueError(f'include_train argument not recognized: ({include_train})')
+
+        sns.lineplot(x=full_dates,y=actuals)
+        labels = ['Actual']
+
+        for m in plot_these_models:
+            # plots with dates if dates are available, else plots with ambiguous integers
+            test_figs = self.info[m]['test_set_predictions']
+            test_dates = self.current_dates[-len(test_figs):]
+            sns.lineplot(x=test_dates,y=test_figs,linestyle='--',alpha=0.7)
+            labels.append(f'{m} test preds')
 
         plt.legend(labels=labels,loc='best')
         plt.xlabel('Date')
