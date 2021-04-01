@@ -117,7 +117,6 @@ class Forecaster:
         pred = regr.predict(X_test)
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = list(pred)
-        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
         self._metrics(call_me)
         regr.fit(X,y)
         new_data = pd.DataFrame(self.future_xreg)
@@ -232,6 +231,7 @@ class Forecaster:
     def _metrics(self,call_me):
         """ creates mape, rmse, mae, and r2
         """
+        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])]
         self.mape[call_me] = np.mean(self.info[call_me]['test_set_ape'])
         self.rmse[call_me] = np.mean([(y - yhat)**2 for yhat,y in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])**0.5
         self.mae[call_me] = np.mean([np.abs(y - yhat) for yhat,y in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])])
@@ -626,7 +626,6 @@ class Forecaster:
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
-        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
@@ -758,7 +757,6 @@ class Forecaster:
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
-        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
@@ -832,7 +830,6 @@ class Forecaster:
         self.info[call_me]['model_form'] = 'FB Prophet'
         self.info[call_me]['test_set_actuals'] = X.iloc[-test_length:,-2].to_list()
         self.info[call_me]['test_set_predictions'] = test['yhat'].to_list()
-        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(self.info[call_me]['test_set_predictions'],self.info[call_me]['test_set_actuals'])]
         self._metrics(call_me)
 
         # forecast
@@ -985,7 +982,6 @@ class Forecaster:
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
-        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self._metrics(call_me)
         self.feature_importance[call_me] = pd.read_csv('tmp/tmp_summary_output.csv',index_col=0)
 
@@ -1042,9 +1038,7 @@ class Forecaster:
         self.info[call_me]['model_form'] = 'ARIMA {}x{} include {}'.format(order,seasonal_order,trend)
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
-        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
-
-        self._metric()
+        self._metrics(call_me)
 
         arima = ARIMA(y,exog=X,order=order,seasonal_order=seasonal_order,trend=trend,dates=dates,**kwargs).fit()
         self.info[call_me]['fitted_values'] = list(arima.fittedvalues)
@@ -1085,7 +1079,6 @@ class Forecaster:
         self.info[call_me]['model_form'] = 'Holt-Winters Exponential Smoothing {}'.format(kwargs)
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
-        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
         self._metrics(call_me)
 
         hwes = HWES(y,dates=dates,**kwargs).fit(optimized=True,use_brute=True)
@@ -1169,7 +1162,6 @@ class Forecaster:
         self.info[call_me]['model_form'] = 'Holt-Winters Exponential Smoothing {}'.format(dict(best_params))
         self.info[call_me]['test_set_actuals'] = list(y_test)
         self.info[call_me]['test_set_predictions'] = pred
-        self.info[call_me]['test_set_ape'] = [np.abs(yhat-y) / np.abs(y) for yhat, y in zip(pred,y_test)]
         self._metrics(call_me)
 
         hwes = HWES(y,dates=dates,initialization_method='estimated',**best_params).fit(optimized=True,use_brute=True)
@@ -1335,7 +1327,6 @@ class Forecaster:
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
-        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
         self.feature_importance[call_me] = pd.DataFrame(index=pd.read_csv('tmp/tmp_r_current.csv').iloc[:,1:].columns.to_list())
@@ -1402,7 +1393,6 @@ class Forecaster:
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
-        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
 
@@ -1463,7 +1453,6 @@ class Forecaster:
         self.info[call_me]['model_form'] = tmp_forecast['model_form'][0]
         self.info[call_me]['test_set_actuals'] = tmp_test_results['actual'].to_list()
         self.info[call_me]['test_set_predictions'] = tmp_test_results['forecast'].to_list()
-        self.info[call_me]['test_set_ape'] = tmp_test_results['APE'].to_list()
         self._metrics(call_me)
         self.info[call_me]['fitted_values'] = tmp_fitted['fitted'].to_list()
 
@@ -1673,7 +1662,6 @@ class Forecaster:
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['test_set_predictions'] = tmp_test_results.iloc[:,0].to_list()
         self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
-        self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
         self._metrics(call_me)
         self.forecasts[call_me] = tmp_forecast.iloc[:,0].to_list()
@@ -1890,7 +1878,6 @@ class Forecaster:
         self.info[call_me]['holdout_periods'] = test_length
         self.info[call_me]['test_set_predictions'] = tmp_test_results.iloc[:,0].to_list()
         self.info[call_me]['test_set_actuals'] = self.y[(-test_length):]
-        self.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(self.y[(-test_length):],tmp_test_results.iloc[:,0])]
         self.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
         self._metrics(call_me)
         self.forecasts[call_me] = tmp_forecast.iloc[:,0].to_list()
@@ -2196,17 +2183,14 @@ class Forecaster:
 
         forecasts = pd.DataFrame()
         test_set_predictions_df = pd.DataFrame()
-        test_set_ape_df = pd.DataFrame()
         for m in avg_these_models:
             test_set_predictions_df[m] = self.info[m]['test_set_predictions'][-(test_length):]
-            test_set_ape_df[m] = self.info[m]['test_set_ape'][-(test_length):] 
             forecasts[m] = self.forecasts[m]
             
         self.info[call_me]['model_form'] = 'Average of ' + str(len(avg_these_models)) + ' models: ' + ', '.join(avg_these_models)
-        self.info[call_me]['test_set_predictions'] = list(test_set_predictions_df.mean(axis=1))
-        self.info[call_me]['test_set_ape'] = list(test_set_ape_df.mean(axis=1))
+        self.info[call_me]['test_set_predictions'] = test_set_predictions_df.mean(axis=1).to_list()
         self._metrics(call_me)
-        self.forecasts[call_me] = list(forecasts.mean(axis=1))
+        self.forecasts[call_me] = forecasts.mean(axis=1).to_list()
 
     def forecast_splice(self,models,periods,call_me='splice',**kwargs):
         """ splices multiple forecasts together
