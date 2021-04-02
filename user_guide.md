@@ -906,6 +906,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 ## Everything Else
 
 [forecast()](#forecast)  
+[keep_smaller_history()](#keep_smaller_history)
 [order_all_forecasts_best_to_worst()](#order_all_forecasts_best_to_worst)  
 [pop()](#pop)  
 [set_best_model()](#set_best_model)  
@@ -921,6 +922,17 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 >>> models = ('ets','tbats','auto_arima')
 >>> for m in models:
 >>>   f.forecast(m,test_length=3)
+```
+
+### keep_smaller_history
+- `Forecaster.keep_smaller_history(n)`
+- keeps a certain number of observations from the dependent variable's history and trims y, current_dates, and current_xreg attributes to all match
+- Paramaters: 
+  - **n** : int
+    - the last number of observations to keep from the time series' history
+    - must be greater than 2
+```python
+f.keep_smaller_history(670) # keeps the last 670 observations in y, current_dates, and current_xreg
 ```
 
 ### order_all_forecasts_best_to_worst

@@ -405,6 +405,17 @@ class Forecaster:
         self.current_xreg = current_xreg_df.to_dict(orient='list')
         self.future_xreg = future_xreg_df.to_dict(orient='list')
 
+    def keep_smaller_history(self,n):
+        """ keeps a certain number of observations from the dependent variable's history and trims y, current_dates, and current_xreg attributes to all match
+            Paramaters: n : int
+                the last number of observations to keep from the time series' history
+        """
+        assert isintance(n,int) & (n > 2), 'n must be an int type and greater than 2'
+        self.y = self.y[-n:]
+        self.current_dates = self.current_dates[-n:]
+        for k, v in self.current_xreg.items():
+            self.current_xreg[k] = v[-n:]
+
     def generate_future_dates(self,n,freq):
         """ generates future dates and stores in the future_dates attribute
             changes forecast_out_periods attribute appropriately
