@@ -454,10 +454,10 @@ class Forecaster:
     def set_ordered_xreg(self,chop_tail_periods=0,include_only='all',exclude=None,quiet=True):
         """ method for ordering stored externals from most to least correlated, according to absolute Pearson correlation coefficient value
             will not error out if a given external has no variation in it -- will simply skip
-            when measuring correlation, will log/difference variables when possible to compare stationary results
-            stores the results in self.ordered_xreg as a list
+            when measuring correlation, will assume all transformations for stationarity have already been made
+            stores the results in ordered_xreg attribute as a list
             if two vars are perfectly correlated, will skip the second one
-            resuting self.ordered_xreg attribute may therefore not contain all xregs but will contain as many as could be set
+            resuting ordered_xreg attribute may therefore not contain all xregs but will contain as many as could be set
             Parameters: chop_tail_periods : int, default 0
                             The number of periods to chop (to compare to a training dataset)
                             This is used to reduce the chance of overfitting the data by using mismatched test periods for forecasts
@@ -481,7 +481,6 @@ class Forecaster:
             ['x2','x1'] # in this case x2 correlates more strongly than x1 with y on a test set with 12 holdout periods
         """
         log_diff = lambda x: np.diff(np.log(x),n=1)
-
         if isinstance(include_only,list):
             use_these_externals = {}
             for e in include_only:
@@ -491,33 +490,22 @@ class Forecaster:
             if isinstance(exclude,list):
                 for e in exclude:
                     use_these_externals.pop(e)
-                
         ext_reg = {}
         for k, v in use_these_externals.items():
             if chop_tail_periods > 0:
-                x = np.array(v[:(chop_tail_periods*-1)])
-                y = np.array(self.y[:(chop_tail_periods*-1)])
+                x = np.array(v[:-chop_tail_periods])
+                y = np.array(self.y[:-chop_tail_periods])
             else:
                 x = np.array(v)
                 y = np.array(self.y[:])
-                
-            if (x.min() <= 0) & (y.min() > 0):
-                y = log_diff(y)
-                x = x[1:]
-            elif (x.min() > 0) & (y.min() > 0):
-                y = log_diff(y)
-                x = log_diff(x)
-            
             if len(np.unique(x)) == 1:
                 if not quiet:
                     print(f'no variation in {k} for time period specified')
                 continue
             else: 
                 r_coeff = stats.pearsonr(y,x)
-            
             if np.abs(r_coeff[0]) not in ext_reg.values():
                 ext_reg[k] = np.abs(r_coeff[0])
-        
         k = Counter(ext_reg) 
         self.ordered_xreg = [h[0] for h in k.most_common()] # this should give us the ranked external regressors
 
@@ -677,7 +665,6 @@ class Forecaster:
         if start == 'auto':
             try: start = tuple(np.array(str(self.current_dates[0]).split('-')[:2]).astype(int))
             except: raise ValueError('could not set start automatically, try passing argument manually')
-
         try:
             float(interval)
         except ValueError:
@@ -2361,7 +2348,7 @@ class Forecaster:
         plt.title(f'{self.name} Forecast Results')
         plt.show()
 
-    def plot_test(self,models='all',metric='mape',include_train=True):
+    def plot_test(self,models='all',metric='mape',print_model_form=False,print_metric=False,include_train=True):
         """ plots the test predictions from each specified model
             Parameters: models : list, "all", or starts with "top_"; default "all"
                             the models you want plotted
@@ -2370,6 +2357,10 @@ class Forecaster:
                             if starts with "top_": reads the next character(s) as the top however models you want plotted (based on metric specified in metric)
                         metric : one of {'mape','rmse','mae','r2'}
                             the error/accuracy metric to consider
+                        print_model_form : bool, default False
+                            whether to print the model form to the console of the models being plotted
+                        print_metric : bool, default False
+                            whether to print the metric specified in metric to the console of the models being plotted
                         include_train : bool or int, default True
                             if bool: whether to include the full training set in the plot or just the part that corresponds with the test predictions
                             if int: the last number of actual observations to include in the plot
@@ -2407,6 +2398,15 @@ class Forecaster:
                 full_dates = self.current_dates[-len(actuals):]
         else:
             raise ValueError(f'include_train argument not recognized: ({include_train})')
+
+        if (print_model_form) | (print_metric):
+            for m in plot_these_models:
+                print_text = '{} '.format(m)
+                if print_model_form:
+                    print_text += "model form: {} ".format(self.info[m]['model_form'])
+                if print_metric:
+                    print_text += "{}-period test-set {}: {} ".format(self.info[m]['holdout_periods'],metric,getattr(self,metric)[m])
+                print(print_text)
 
         sns.lineplot(x=full_dates,y=actuals)
         labels = ['Actual']

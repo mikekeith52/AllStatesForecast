@@ -39,7 +39,7 @@
   - var (vector auto regression - R vars::VAR)
   - vecm (vector error correction model - R tsDyn::VECM)
 - for every evaluated model, the following information is stored in the object attributes:
-  - in self.info (dict), a key is added as the model name and a nested dictionary as the value
+  - in info (dict), a key is added as the model name and a nested dictionary as the value
     - the nested dictionary has the following keys:
       - 'holdout_periods' : int - the number of periods held out in the test set
       - 'model_form' : str - the name of the model with any hyperparameters, external regressors, etc
@@ -47,12 +47,12 @@
       - 'test_set_predictions' : list - the predicted figures from the test set evaluated with a model from the training set
       - 'test_set_ape' : list - the absolute percentage error for each period from the forecasted training set figures, evaluated with the actual test set figures
       - 'fitted_values' : list - the model's fitted values, when available. if not available, None
-  - in self.mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
-  - in self.rmse (dict), a key is added as the model name and the Root Mean Square Error as the value
-  - in self.mae (dict), a key is added as the model name and the Mean Absolute Error as the value
-  - in self.r2 (dict), a key is added as the model name and the R Squared as the value
-  - in self.forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
-  - in self.feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features' prediction power
+  - in mape (dict), a key is added as the model name and the Mean Absolute Percent Error as the value
+  - in rmse (dict), a key is added as the model name and the Root Mean Square Error as the value
+  - in mae (dict), a key is added as the model name and the Mean Absolute Error as the value
+  - in r2 (dict), a key is added as the model name and the R Squared as the value
+  - in forecasts (dict), a key is added as the model name and a list of forecasted figures as the value
+  - in feature_importance (dict), a key is added to the dictionary as the model name and the value is a dataframe that gives some info about the features' prediction power
     - if it is an sklearn model, it will be permutation feature importance from the eli5 package (https://eli5.readthedocs.io/en/latest/blackbox/permutation_importance.html)
     - any other model, it is a dataframe with at least the names of the variables in the index, with as much summary statistical info as possible
     - if the model doesn't use external regressors, no key is added here
@@ -64,7 +64,7 @@ there are two ways to initialize a Forecaster object:
 1. initialize empty and fill with FRED data through the pandas data-reader API:
 - `Forecaster.get_data_fred(series,i=0,date_start='1900-01-01')`
 - imports data from FRED into a pandas dataframe
-- stores the results in self.name, self.y, and self.current_dates
+- stores the results in name, y, and current_dates attributes
 - Parameters: 
   - **series** : str
     - the name of the series to extract from FRED
@@ -94,7 +94,7 @@ there are two ways to initialize a Forecaster object:
   - **y** : list  
     - the figures that will be forecasted forward
   - **current_dates** : list  
-    - an ordered list of dates that correspond to the ordered values in self.y  
+    - an ordered list of dates that correspond to the ordered values in y attribute  
     - elements must be able to be parsed by pandas as dates  
   - **future_dates** : list  
     - an ordered list of dates that correspond to the future periods being forecasted  
@@ -131,7 +131,7 @@ there are two ways to initialize a Forecaster object:
 3
 ```
 2. `Forecaster.set_forecast_out_periods(n)`
-- sets the self.forecast_out_periods attribute and truncates self.future_dates and self.future_xreg if needed
+- sets the forecast_out_periods attribute and truncates future_dates and future_xreg if needed
 - Parameters: 
   - **n** : int
     - the number of periods you want to forecast out for
@@ -150,12 +150,12 @@ there are two ways to initialize a Forecaster object:
 - takes a dataframe of external regressors and ingests it into the object
 - any non-numeric data will be made into a 0/1 binary variable (using `pandas.get_dummies(drop_first=True)`)
 - deals with columns with missing data
-- eliminates rows that don't correspond with self.y's timeframe
+- eliminates rows that don't correspond with y attribute's timeframe
 - splits values between future and current observations
-- changes self.forecast_out_periods based on how many periods included in the dataframe past current_dates attribute
-- assumes the dataframe is aggregated to the same timeframe as self.y (monthly, quarterly, etc.)
+- changes forecast_out_periods attribute based on how many periods included in the dataframe past current_dates attribute
+- assumes the dataframe is aggregated to the same timeframe as y attribute (monthly, quarterly, etc.)
 - for more complex processing, perform manipulations before passing through this function
-- stores results in self.current_xreg, self.future_xreg, self.future_dates, and self.forecast_out_periods
+- stores results in current_xreg, future_xreg, future_dates, and forecast_out_periods attributes
 - Parameters: 
   - **xreg_df** : pandas dataframe, required
     - this should include only independent regressors either in numeric form or that can be dummied into a 1/0 variable as well as a date column that can be parsed by pandas
@@ -220,12 +220,12 @@ there are two ways to initialize a Forecaster object:
   - **Xvars** : list or "all", default "all"
     - the independent variables to use in the resulting X dataframes
   - **call_me** : str, default "rf"
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
   - **hyper_params** : dict, default {}
     - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
     - passed as an argument collection to the sklearn model
   - **set_feature_importance** : bool, default True
-    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - if True, adds a key to feature_importance with the call_me parameter as a key
     - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
     - not setting this to True means it will be ignored, which improves speed
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
@@ -247,7 +247,7 @@ there are two ways to initialize a Forecaster object:
     - the independent variables to use in the resulting X dataframes  
     - "top_" not supported  
   - **call_me** : str, default "arima"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
   - Info about all other arguments (order, seasonal_order, trend) can be found in the sm.tsa.arima.model.ARIMA documentation (linked above)  
   - other arguments from ARIMA() function can be passed as keywords  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults 
@@ -272,7 +272,7 @@ there are two ways to initialize a Forecaster object:
       - because the auto.arima function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option  
       - if no arima model can be estimated, will raise an error
   - **call_me** : str, default "auto_arima"
-      - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+      - the model's nickname -- this name carries to the info, mape, and forecasts attributes  
 ```python
 >>> f = Forecaster()
 >>> f.get_data_fred('UTUR')
@@ -310,7 +310,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - 1st element is the start year  
     - 2nd element is the start period in the appropriate interval  
     - for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)  
-    - if "auto", assumes the dates in self.current_dates are monthly in yyyy-mm-01 format and will use the first element in the list   
+    - if "auto", assumes the dates in current_dates attribute are monthly in yyyy-mm-01 format and will use the first element in the list   
   - **interval** : float, default 12  
     - the number of periods in one season (365.25 for annual, 12 for monthly, etc.)  
   - **Xvars** : list, "all", None, or starts with "top_", default None  
@@ -323,7 +323,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - because the auto.arima function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option  
     - if no arima model can be estimated, will raise an error  
   - **call_me** : str, default "auto_arima_seas"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes   
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
 ### forecast_auto_hwes
@@ -345,7 +345,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - the number of periods to complete one seasonal period (for monthly, this is 12)  
     - ignored if seasonal is False  
   - **call_me** : str, default "hwes"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes 
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults   
 
 ### forecast_average
@@ -363,7 +363,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - all models passed here will be excluded  
     - if models parameters starts with "top" and one of those top models is in the list passed to exclude, that model will be excluded, and the other however many will be averaged (so you might only get 3 models averaged if you pass "top_4" for example)  
   - **call_me** : str, default "average"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes 
   - **test_length** : int or "max", default "max"  
     - the test length to assign to the average model  
     - if max, it will use the maximum test_length that all saved models can support  
@@ -382,7 +382,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - the number of periods to hold out to test the model  
     - must be at least 1 
   - **call_me** : str, default "ets"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
 ### forecast_gbt
@@ -395,12 +395,12 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **Xvars** : list or "all", default "all"
     - the independent variables to use in the resulting X dataframes
   - **call_me** : str, default "gbt"
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
   - **hyper_params** : dict, default {}
     - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
     - passed as an argument collection to the sklearn model
   - **set_feature_importance** : bool, default True
-    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - if True, adds a key to feature_importance attribute with the call_me parameter as a key
     - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
     - not setting this to True means it will be ignored, which improves speed
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
@@ -418,9 +418,9 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - the number of periods to hold out to test the model  
     - must be at least 1   
   - **call_me** : str, default "hwes"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes  
   - keywords are passed to the ExponentialSmoothing function from statsmodels -- `dates` is specified automatically  
-  - some important parameters to specify as key words: trend, damped_trend, seasonal, seasonal_periods, use_boxcox  
+  - some important parameters to specify as keywords: trend, damped_trend, seasonal, seasonal_periods, use_boxcox  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
 
 ### forecast_lasso
@@ -433,12 +433,12 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **Xvars** : list or "all", default "all"
     - the independent variables to use in the resulting X dataframes
   - **call_me** : str, default "lasso"
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
   - **alpha** : float, default 1.0
     - the desired alpha hyperparameter to pass to the sklearn model
     - 1.0 is also the default in sklearn
   - **set_feature_importance** : bool, default True
-    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - if True, adds a key to feature_importance attribute with the call_me parameter as a key
     - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
     - not setting this to True means it will be ignored, which improves speed  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
@@ -453,12 +453,12 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **Xvars** : list or "all", default "all"
     - the independent variables to use in the resulting X dataframes
   - **call_me** : str, default "mlp"
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
   - **hyper_params** : dict, default {}
     - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
     - passed as an argument collection to the sklearn model
   - **set_feature_importance** : bool, default True
-    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - if True, adds a key to feature_importance attribute with the call_me parameter as a key
     - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
     - not setting this to True means it will be ignored, which improves speed
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
@@ -473,9 +473,9 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **Xvars** : list or "all", default "all"
     - the independent variables to use in the resulting X dataframes
   - **call_me** : str, default "mlr"
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
   - **set_feature_importance** : bool, default True
-    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - if True, adds a key to feature_importance attribute with the call_me parameter as a key
     - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
     - not setting this to True means it will be ignored, which improves speed
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
@@ -490,12 +490,12 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **Xvars** : list or "all", default "all"
     - the independent variables to use in the resulting X dataframes
   - **call_me** : str, default "rf"
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
   - **hyper_params** : dict, default {}
     - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
     - passed as an argument collection to the sklearn model
   - **set_feature_importance** : bool, default True
-    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - if True, adds a key to feature_importance attribute with the call_me parameter as a key
     - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
     - not setting this to True means it will be ignored, which improves speed
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
@@ -510,12 +510,12 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **Xvars** : list or "all", default "all"
     - the independent variables to use in the resulting X dataframes
   - **call_me** : str, default "ridge"
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
   - **alpha** : float, default 1.0
     - the desired alpha hyperparameter to pass to the sklearn model
     - 1.0 is also the default in sklearn
   - **set_feature_importance** : bool, default True
-    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - if True, adds a key to feature_importance attribute with the call_me parameter as a key
     - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
     - not setting this to True means it will be ignored, which improves speed
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
@@ -533,7 +533,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - 1st element is the start year  
     - 2nd element is the start period in the appropriate interval  
     - for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)  
-    - if "auto", assumes the dates in self.current_dates are monthly in yyyy-mm-01 format and will use the first element in the list  
+    - if "auto", assumes the dates in current_dates attribute are monthly in yyyy-mm-01 format and will use the first element in the list  
   - **interval** : float, default 12  
     - the number of periods in one season (365.25 for annual, 12 for monthly, etc.)  
   - **Xvars** : list, "all", None, or starts with "top_", default None  
@@ -559,7 +559,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - 'pass' will not attempt to evaluate a model without raising an error  
     - 'print' will not evaluate the model but print the error  
   - **call_me** : str, default "nnetar"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
 ### forecast_prophet
@@ -575,8 +575,8 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - "top" is determined through absolute value of the pearson correlation coefficient on the training set
     - if using "top_" and the integer is a greater number than the available x regressors, the model will be estimated with all available x regressors that are not perfectly colinear and have variation
   - **call_me** : str, default "prophet"
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
-  - key words are passed to Prophet() function
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
+  - keywords are passed to Prophet() function
   - for logistic growth, you will need to add "cap" and/or "floor" variables to the keywords--they will not be passed to the Prophet() function
 ```python
 >>> f = Forecaster()
@@ -606,7 +606,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
       - 1st element is the start year  
       - 2nd element is the start period in the appropriate interval  
       - for instance, if you have quarterly data and your first obs is 2nd quarter of 1980, this would be (1980,2)  
-      - if "auto", assumes the dates in self.current_dates are monthly in yyyy-mm-01 format and will use the first element in the list  
+      - if "auto", assumes the dates in current_dates attribute are monthly in yyyy-mm-01 format and will use the first element in the list  
   - **interval** : 1 of {1,2,4,12}, default 12  
       - 1 for annual, 2 for bi-annual, 4 for quarterly, 12 for monthly  
       - unfortunately, x13 does not allow for more granularity than the monthly level  
@@ -620,7 +620,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
       - because the seas function fails in the cases of perfect collinearity or no variation, using "top_" or a list with one element is safest option  
       - x13 already has an extensive list of x regressors that it will pull automatically--read the documentation for more info  
   - **call_me** : str, default "sarimax13"  
-      - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+      - the model's nickname -- this name carries to the info, mape, and forecasts attributes  
   - **error**: one of {"raise","pass","print"}, default "raise"  
       - if unable to estimate the model, "raise" will raise an error  
       - if unable to estimate the model, "pass" will silently skip the model
@@ -642,7 +642,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
       - models[-1] --> periods[-1]:
   - **call_me** : str
     - the model nickname
-  - key words should be the name of a metric ('mape','rmse','mae','r2') and a numeric value as the argument since some functions don't evaluate without numeric metrics
+  - keywords should be the name of a metric ('mape','rmse','mae','r2') and a numeric value as the argument since some functions don't evaluate without numeric metrics
 ```python
 >>> f.forecast_splice(models=['arima','tbats'],periods=(datetime.datetime(2020,1,1),)) # one splice in january 2020
 >>> f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020,1,1),datetime.datetime(2020,3,1))) # two splices in january and march 2020, respectively
@@ -658,12 +658,12 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
   - **Xvars** : list or "all", default "all"
     - the independent variables to use in the resulting X dataframes
   - **call_me** : str, default "mlp"
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
   - **hyper_params** : dict, default {}
     - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
     - passed as an argument collection to the sklearn model
   - **set_feature_importance** : bool, default True
-    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - if True, adds a key to feature_importance attribute with the call_me parameter as a key
     - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
     - not setting this to True means it will be ignored, which improves speed
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
@@ -682,7 +682,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - the number of seasonal periods to consider (12 for monthly, etc.)  
     - if no seasonality desired, leave "NULL" as this will be passed directly to the tbats function in r  
   - **call_me** : str, default "tbats"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
 ### forecast_var
@@ -694,10 +694,10 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - Parameters: 
   - **series** : required  
     - lists of other series to run the VAR with  
-    - each list must be the same size as self.y if auto_resize is False  
+    - each list must be the same size as y attribute if auto_resize is False  
     - be sure to exclude NAs  
   - **auto_resize** : bool, default False  
-    - if True, if series in series are different size than self.y, all series will be truncated to match the shortest series  
+    - if True, if series in series are different size than y attribute, all series will be truncated to match the shortest series  
     - if True, note that the forecast will not necessarily make predictions based on the entire history available in y  
     - using this assumes that the shortest series ends at the same time the others do and there are no periods missing  
   - **test_length** : int, default 1  
@@ -727,7 +727,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - None signifies that all combinations will be tried  
     - reducing this from None can speed up processing and reduce overfitting  
   - **call_me** : str, default "var"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 - See [Analysis 7](#analysis-7) for an example of how to run a vector error correction model (which is similar to the setup for var)
 
@@ -739,12 +739,12 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - Parameters: 
   - **cids** : required  
     - lists of cointegrated data  
-    - each list must be the same size as self.y  
-    - if this is only 1 list, it must be cointegrated with self.y  
-    - if more than 1 list, there must be at least 1 cointegrated pair between cids* and self.y (to fulfill the requirements of VECM)  
+    - each list must be the same size as y attribute  
+    - if this is only 1 list, it must be cointegrated with y  
+    - if more than 1 list, there must be at least 1 cointegrated pair between cids* and y (to fulfill the requirements of VECM)  
     - be sure to exclude NAs  
   - **auto_resize** : bool, default False  
-    - if True, if series in cids are different size than self.y, all series will be truncated to match the shortest series  
+    - if True, if series in cids are different size than y, all series will be truncated to match the shortest series  
     - if True, note that the forecast will not necessarily make predictions based on the entire history available in y  
     - using this assumes that the shortest series ends at the same time the others do and there are no periods missing  
   - **test_length** : int, default 1  
@@ -759,7 +759,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - if it is "all", will attempt to estimate a model with all available x regressors  
     - because the VECM function will fail if there is perfect collinearity in any of the xregs or if there is no variation in any of the xregs, using "top_" is safest option  
   - **r** : int, default 1  
-    - the number of total cointegrated relationships between self.y and cids  
+    - the number of total cointegrated relationships between y and cids  
   - **max_lags** : int, default 6  
     - the total number of lags that will be used in the optimization process  
     - 1 to this number will be attempted  
@@ -772,7 +772,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - None signifies that all combinations will be tried  
     - reducing this from None can speed up processing and reduce overfitting  
   - **call_me** : str, default "vecm"  
-    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries  
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults 
 - See [Analysis 7](#analysis-7) for an example of how to run a vector error correction model
 
@@ -802,7 +802,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 >>> f.plot(models='top_4')
 >>> f.plot(models='top_1',print_mapes=True,plot_fitted=True)
 ```
-2. `Forecaster.plot_test(models='all',metric='mape',include_train=True)`
+2. `Forecaster.plot_test(models='all',metric='mape',print_model_form=False,print_metric=False,include_train=True)`
 - Plots the test predictions from each specified model
 - Parameters: 
   - **models** : list, "all", or starts with "top_"; default "all"
@@ -812,6 +812,10 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - if starts with "top_": reads the next character(s) as the top however models you want plotted (based on metric specified in metric)
   - **metric** : one of {'mape','rmse','mae','r2'}
     - the error/accuracy metric to consider
+  - **print_model_form** : bool, default False  
+    - whether to print the model form to the console of the models being plotted  
+  - **print_metric** : bool, default False  
+    - whether to print the metric specified in metric to the console of the models being plotted
   - **include_train** : bool or int, default True
     - if bool: whether to include the full training set in the plot or just the part that corresponds with the test predictions
     - if int: the last number of actual observations to include in the plot
@@ -917,7 +921,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - Parameters:
   - **which** : str
     - the model to forecast
-  - key words passed to the model arguments
+  - keywords passed to the model arguments
 ```python
 >>> models = ('ets','tbats','auto_arima')
 >>> for m in models:
@@ -1178,7 +1182,7 @@ def save_info_about_other_series(trgt_obj,from_obj,pos=1,call_me='vecm'):
   trgt_obj.info[call_me]['test_set_ape'] = [np.abs(y - yhat) / np.abs(y) for y, yhat in zip(trgt_obj.y[(-test_length):],tmp_test_results.iloc[:,pos])]
   trgt_obj.info[call_me]['model_form'] = tmp_test_results['model_form'][0]
   trgt_obj.info[call_me]['fitted_values'] = None
-  trgt_obj._metrics(call_me)
+  trgt_obj._metrics(call_me) # sets mape, rmse, mae, and r2 attributes
   trgt_obj.forecasts[call_me] = tmp_forecast.iloc[:,pos].to_list()
   
   if call_me in from_obj.feature_importance.keys():
