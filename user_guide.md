@@ -867,10 +867,11 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - what to do with spliced models since they don't have the same stats/info as other models
     - 'skip' skips them
     - 'error' raises an error
+  - print_df : bool, default False
+    - whether to print the dataframe
   - keywords are columns and corresponding values to also add to the dataframe
 ```python
->>> forecast_stats = f.vomit(order_by='mape')
->>> print(forecast_stats.head())
+>>> forecast_stats = f.vomit(order_by='mape',print_df=True)
        name series_start_date series_end_date  nobs model_nickname  \
 0  HOUSTNSA        1976-01-01      2021-01-01   541        prophet   
 1  HOUSTNSA        1976-01-01      2021-01-01   541     auto_arima   
@@ -910,7 +911,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 ## Everything Else
 
 [forecast()](#forecast)  
-[keep_smaller_history()](#keep_smaller_history)
+[keep_smaller_history()](#keep_smaller_history)  
 [order_all_forecasts_best_to_worst()](#order_all_forecasts_best_to_worst)  
 [pop()](#pop)  
 [set_best_model()](#set_best_model)  
