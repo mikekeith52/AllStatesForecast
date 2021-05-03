@@ -407,10 +407,18 @@ class Forecaster:
 
     def keep_smaller_history(self,n):
         """ keeps a certain number of observations from the dependent variable's history and trims y, current_dates, and current_xreg attributes to all match
-            Paramaters: n : int
-                the last number of observations to keep from the time series' history
+            Paramaters: n : int, datetime/pandas timestamp object, or str in yyyy-mm-dd format
+                the last number of observations to keep from the time series' history or the last date to keep
         """
-        assert isintance(n,int) & (n > 2), 'n must be an int type and greater than 2'
+        try:
+            self._ready_for_forecast()
+        except ForecastFormatError as e:
+            raise ForecastFormatError(f'before calling keep_smaller_history, please make sure all forecast properties are configured properly:\n{e}')
+        if isinstance(n,str):
+            n = datetime.datetime.strptime(n,'%Y-%m-%d')
+        if (type(n) is datetime.datetime) or (type(n) is pd.Timestamp):
+            n = len([i for i in self.current_dates if i >= n])
+        assert (isinstance(n,int)) & (n > 2), 'n must be an int, datetime object, or str in yyyy-mm-dd format and there must be more than 2 observations to keep'
         self.y = self.y[-n:]
         self.current_dates = self.current_dates[-n:]
         for k, v in self.current_xreg.items():
@@ -2194,7 +2202,7 @@ class Forecaster:
         """ splices multiple forecasts together
             this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
             Parameters: models : list
-                        periods : tuple of datetime objects
+                        periods : list-like of datetime objects or str objects in yyyy-mm-dd format
                             must be one less in length than models
                             each date represents a splice
                                 model[0] --> :periods[0]
@@ -2207,9 +2215,13 @@ class Forecaster:
         assert isinstance(models,list), 'models must be a list'
         assert len(models) >= 2, 'need at least two models passed to models'
         assert np.array([m in self.forecasts.keys() for m in models]).all(), 'all models must have been evaluated already'
-        assert isinstance(periods,tuple), 'periods must be a tuple'
+        assert (not isinstance(periods,str)) & len(periods), 'periods must be list-like'
         assert len(models) == len(periods) + 1, 'models must be exactly 1 greater in length than periods'
-        assert np.array([p in self.future_dates for p in periods]).all(), 'all elements in periods must be datetime objects in future_dates'
+
+        if isinstance(periods[0],str):
+            periods = tuple([datetime.datetime.strptime(i,'%Y-%m-%d') for i in periods])
+
+        assert np.array([p in self.future_dates for p in periods]).all(), 'all elements in periods must be datetime objects or str in yyyy-mm-dd format and must be in future_dates attribute'
 
         self.info[call_me] = self._get_info_dict()
         self.info[call_me]['model_form'] = "Splice of {}; splice point(s): {}".format(', '.join([k for k in self.info if k in models]), ', '.join([v.strftime('%Y-%m-%d') for v in periods]))

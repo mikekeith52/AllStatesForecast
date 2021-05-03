@@ -634,8 +634,8 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - splices multiple forecasts together
 - this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
 - Parameters: 
-  - **models** : list
-  - **periods** : tuple of datetime objects
+  - **models** : list of model nicknames that have been evaluated
+  - **periods** : list-like of datetime objects or str objects in yyyy-mm-dd format
     - must be one less in length than models
     - each date represents a splice
       - model[0] --> :periods[0]
@@ -933,11 +933,12 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - `Forecaster.keep_smaller_history(n)`
 - keeps a certain number of observations from the dependent variable's history and trims y, current_dates, and current_xreg attributes to all match
 - Paramaters: 
-  - **n** : int
-    - the last number of observations to keep from the time series' history
-    - must be greater than 2
+  - **n** : int, datetime/pandas timestamp object, or str in yyyy-mm-dd format
+    - the last number of observations to keep from the time series' history or the last date to keep
 ```python
 f.keep_smaller_history(670) # keeps the last 670 observations in y, current_dates, and current_xreg
+f.keep_smaller_history('2020-12-31') # keeps all obs this date or later
+f.keep_smaller_history(datetime.datetime(2020,12,31)) # keeps all obs this date or later
 ```
 
 ### order_all_forecasts_best_to_worst
