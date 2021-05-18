@@ -634,18 +634,21 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - splices multiple forecasts together
 - this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
 - Parameters: 
-  - **models** : list of model nicknames that have been evaluated
+  - **models** : list(str)
+    - each element is the model nickname of already-evaluated forecasts
   - **periods** : list-like of datetime objects or str objects in yyyy-mm-dd format
-    - must be one less in length than models
+    - the model splice points
+    - length of list-like object must be one less than length of models
     - each date represents a splice
       - model[0] --> :periods[0]
       - models[-1] --> periods[-1]:
+    - no mixing data types (no str and datetime objects)
   - **call_me** : str
     - the model nickname
-  - keywords should be the name of a metric ('mape','rmse','mae','r2') and a numeric value as the argument since some functions don't evaluate without numeric metrics
+  - use keywords to force a metric value for smoother processing of some other methods (like [plot()](#plotting), etc.) -- should be the name of a metric {'mape','rmse','mae','r2'} and a numeric value as the argument
 ```python
->>> f.forecast_splice(models=['arima','tbats'],periods=(datetime.datetime(2020,1,1),)) # one splice in january 2020
->>> f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020,1,1),datetime.datetime(2020,3,1))) # two splices in january and march 2020, respectively
+>>> f.forecast_splice(models=['arima','tbats'],periods=('2020-01-01',)) # one splice in january 2020
+>>> f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020,1,1),datetime.datetime(2020,3,1)), mape = 0.05, r2 = .95) # two splices in january and march 2020, respectively
 ```
 
 ### forecast_svr

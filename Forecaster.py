@@ -191,9 +191,8 @@ class Forecaster:
                         Xvars = self.ordered_xreg[:top_xreg]
             elif Xvars == 'all':
                 Xvars = list(self.current_xreg.keys())
-            else:
-                print(f'Xvars argument not recognized: {Xvars}, changing to None')
-                Xvars = None
+            elif not Xvars is None:
+                raise ValueError(f'Xvars argument not recognized: {Xvars}')
 
         for lib in libs:
             try:  importr(lib)
@@ -203,13 +202,11 @@ class Forecaster:
 
         if isinstance(Xvars,list):
             current_df = current_df[['y'] + Xvars] # reorder columns 
-        elif Xvars is None:
+        else:
             current_df = current_df['y']
-        elif Xvars != 'all':
-           raise ValueError(f'unknown argument passed to Xvars: {Xvars}')
 
         if 'tmp' not in os.listdir():
-            os.mkdir('tmp')
+            os.mkdir('tmp') # where all 
 
         current_df.to_csv(f'tmp/tmp_r_current.csv',index=False)
         
@@ -242,10 +239,10 @@ class Forecaster:
             self.r2[call_me] = None
 
     def _ready_for_forecast(self,need_xreg=False):
-        """ runs before each attempted to forecast to make sure:
+        """ runs before each attempt to forecast to make sure:
                 y is set as a list of numeric figures
-                current_dates is set as a list of datetime objects
-                future_dates is set as a list of datetime objects
+                current_dates is set as a list of datetime-like objects
+                future_dates is set as a list of datetime-like objects
                 if current_xreg is set, future_xreg is also set and both are dictionaries with lists as values
         """  
         _no_error_ = 'before forecasting, the following issues need to be corrected:'
@@ -1103,7 +1100,7 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
-                        seasonal : bool, default False
+                        seasonal : bool or None, default False
                             whether there is seasonality in the series
                         seasonal_periods : int, default None
                             the number of periods to complete one seasonal period (for monthly, this is 12)
@@ -1123,7 +1120,7 @@ class Forecaster:
         if seasonal:
             assert isinstance(seasonal_periods,int),'seasonal_periods must be int type when seasonal is True'
             assert seasonal_periods > 0,'seasonal_periods must be greater than 1 when seasonal is True'
-        elif not seasonal:
+        elif (not seasonal) | (seasonal is None):
             seasonal_periods = None
         else:
             raise ValueError(f'argument passed to seasonal not recognized: {seasonal}')
@@ -1136,24 +1133,15 @@ class Forecaster:
         dates = self.current_dates[:]
 
         scores = [] # lower is better
-        if y.min() > 0:
-            grid = expand_grid({
-                'trend':[None,'add','mul'],
-                'seasonal':[None] if not seasonal else ['add','mul'],
-                'damped_trend':[True,False],
-                'use_boxcox':[True,False,0], # the last one is a log transformation
-                'seasonal_periods':[None] if not seasonal else [seasonal_periods]
-            })
-        else: # multiplicative trends only work for series of all positive figures
-            grid = expand_grid({
-                'trend':[None,'add'],
-                'seasonal':[None] if not seasonal else ['add'],
-                'damped_trend':[True,False],
-                'use_boxcox':[None], # the last one is a log transformation
-                'seasonal_periods':[None] if not seasonal else [seasonal_periods]
-            })
+        grid = expand_grid({
+            'trend':[None,'add','mul'] if y.min() > 0 else [None,'add'],
+            'seasonal':[None] if not seasonal else ['add','mul'] if y.min() > 0 else ['add'],
+            'damped_trend':[True,False],
+            'use_boxcox':[True,False,0] if y.min() > 0 else [None], # 0 is a log transformation
+            'seasonal_periods':[None] if not seasonal else [seasonal_periods]
+        })
 
-        grid = grid.loc[((grid['trend'].isnull()) & (~grid['damped_trend'])) | (~grid['trend'].isnull())].reset_index(drop=True) # it does not know how to damp when there is no trend
+        grid = grid.loc[((grid['trend'].isnull()) & (~grid['damped_trend'])) | (~grid['trend'].isnull())].reset_index(drop=True) # model does not damp when there is no trend
 
         for i, params in grid.iterrows():
             hwes_scored = HWES(y_train,dates=dates,initialization_method='estimated',**params).fit(optimized=True,use_brute=True)
@@ -2202,11 +2190,14 @@ class Forecaster:
         """ splices multiple forecasts together
             this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
             Parameters: models : list
+                            each element is model nickname of already-evaluated forecasts
                         periods : list-like of datetime objects or str objects in yyyy-mm-dd format
-                            must be one less in length than models
+                            the model splice points
+                            length must be one less than length of models
                             each date represents a splice
                                 model[0] --> :periods[0]
                                 models[-1] --> periods[-1]:
+                            no mixing data types (no str and datetime objects)
                         call_me : str
                             the model nickname
                         keywords should be the name of a metric ('mape','rmse','mae','r2') and a numeric value as the argument since some functions don't evaluate without numeric metrics
@@ -2219,7 +2210,7 @@ class Forecaster:
         assert len(models) == len(periods) + 1, 'models must be exactly 1 greater in length than periods'
 
         if isinstance(periods[0],str):
-            periods = tuple([datetime.datetime.strptime(i,'%Y-%m-%d') for i in periods])
+            periods = [datetime.datetime.strptime(i,'%Y-%m-%d') for i in periods]
 
         assert np.array([p in self.future_dates for p in periods]).all(), 'all elements in periods must be datetime objects or str in yyyy-mm-dd format and must be in future_dates attribute'
 
@@ -2397,8 +2388,8 @@ class Forecaster:
         else:
             raise ValueError(f'models must be list or str, got {type(models)}')
 
-        if isinstance(include_train,int):
-            assert include_train > 1, 'include_train must be greater than 1'
+        if str(include_train).isnumeric():
+            assert (include_train > 1) & isinstance(include_train,int), f'include_train must be a bool type or an int greater than 1, got {include_train}'
             actuals = self.y[-include_train:]
             full_dates = self.current_dates[-include_train:]
         elif isinstance(include_train,bool):
