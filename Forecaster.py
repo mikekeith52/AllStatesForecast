@@ -2206,7 +2206,7 @@ class Forecaster:
         assert isinstance(models,list), 'models must be a list'
         assert len(models) >= 2, 'need at least two models passed to models'
         assert np.array([m in self.forecasts.keys() for m in models]).all(), 'all models must have been evaluated already'
-        assert (not isinstance(periods,str)) & len(periods), 'periods must be list-like'
+        assert (not isinstance(periods,str)) & (len(periods) > 0), 'periods must be list-like'
         assert len(models) == len(periods) + 1, 'models must be exactly 1 greater in length than periods'
 
         if isinstance(periods[0],str):
@@ -2224,6 +2224,7 @@ class Forecaster:
             else:
                 raise ValueError(f'keyword {kw} not recognized!')
         
+        periods = sorted(periods) # just in case
         # splice
         start = 0
         for i in range(len(periods)):
@@ -2449,7 +2450,7 @@ class Forecaster:
         """
         df = pd.DataFrame(index=self.future_dates)
         if isinstance(which,str):
-            if (which == 'all') | (which.startswith('top_') & (int(which.split('_')[1]) > len(self.forecasts.keys()))):
+            if which == 'all':
                 for m in self.order_all_forecasts_best_to_worst(metric)[:]:
                     df[m] = self.forecasts[m]
             elif which.startswith('top_'):
