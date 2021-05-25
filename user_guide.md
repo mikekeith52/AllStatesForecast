@@ -632,7 +632,8 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 ### forecast_splice
 - `Forecaster.forecast_splice(models,periods,call_me='splice',**kwargs)`
 - splices multiple forecasts together
-- this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
+-this model's metrics will be an average of the models in models and the test_set_predictions will be from the first model in models
+  - the metric values can be overwritten by passing one of them to kwargs (ex. r2 = .95 will assign .95 to the object's r2 attribute)
 - Parameters: 
   - **models** : list(str)
     - each element is the model nickname of already-evaluated forecasts
@@ -645,7 +646,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - no mixing data types (no str and datetime objects)
   - **call_me** : str
     - the model nickname
-  - use keywords to force a metric value for smoother processing of some other methods (like [plot()](#plotting), etc.) -- should be the name of a metric {'mape','rmse','mae','r2'} and a numeric value as the argument
+  - use keywords to force a metric value -- should be the name of a metric {'mape','rmse','mae','r2'} and a numeric value as the argument
 ```python
 >>> f.forecast_splice(models=['arima','tbats'],periods=('2020-01-01',)) # one splice in january 2020
 >>> f.forecast_splice(models=['arima','ets','tbats'],periods=(datetime.datetime(2020,1,1),datetime.datetime(2020,3,1)), mape = 0.05, r2 = .95) # two splices in january and march 2020, respectively
