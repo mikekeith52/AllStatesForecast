@@ -1135,10 +1135,10 @@ class Forecaster:
         scores = [] # lower is better
         grid = expand_grid({
             'trend':[None,'add','mul'] if y.min() > 0 else [None,'add'],
-            'seasonal':[None] if not seasonal else ['add','mul'] if y.min() > 0 else ['add'],
+            'seasonal':[None] if seasonal_periods is None else ['add','mul'] if y.min() > 0 else ['add'],
             'damped_trend':[True,False],
             'use_boxcox':[True,False,0] if y.min() > 0 else [None], # 0 is a log transformation
-            'seasonal_periods':[None] if not seasonal else [seasonal_periods]
+            'seasonal_periods':[seasonal_periods]
         })
 
         grid = grid.loc[((grid['trend'].isnull()) & (~grid['damped_trend'])) | (~grid['trend'].isnull())].reset_index(drop=True) # model does not damp when there is no trend
@@ -2188,7 +2188,8 @@ class Forecaster:
 
     def forecast_splice(self,models,periods,call_me='splice',**kwargs):
         """ splices multiple forecasts together
-            this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
+            this model's metrics will be an average of the models in models and the test_set_predictions will be from the first model in models
+                the metric values can be overwritten by passing one of them to kwargs (ex. r2 = .95 will assign .95 to the object's r2 attribute)
             Parameters: models : list
                             each element is model nickname of already-evaluated forecasts
                         periods : list-like of datetime objects or str objects in yyyy-mm-dd format
@@ -2216,6 +2217,13 @@ class Forecaster:
 
         self.info[call_me] = self._get_info_dict()
         self.info[call_me]['model_form'] = "Splice of {}; splice point(s): {}".format(', '.join([k for k in self.info if k in models]), ', '.join([v.strftime('%Y-%m-%d') for v in periods]))
+        self.info[call_me]['test_set_actuals'] = self.info[models[0]]['test_set_actuals'][:]
+        self.info[call_me]['test_set_predictions'] = self.info[models[0]]['test_set_predictions'][:]
+        self.info[call_me]['holdout_periods'] = len(self.info[models[0]]['test_set_actuals'])
+        self.mape[call_me] = np.mean([self.mape[m] for m in models])
+        self.rmse[call_me] = np.mean([self.rmse[m] for m in models])
+        self.mae[call_me] = np.mean([self.mae[m] for m in models])
+        self.r2[call_me] = np.mean([self.r2[m] for m in models])
         self.forecasts[call_me] = [None]*self.forecast_out_periods
 
         for kw,v in kwargs.items():
@@ -2470,7 +2478,7 @@ class Forecaster:
 
         return df
 
-    def vomit(self,order_by=None,spliced_models='skip',print_df=False,**kwargs):
+    def vomit(self,order_by=None,print_df=False,**kwargs):
         """ outputs stats about each forecast and returns a pandas dataframe
             Parameters: order_by : one of {None,'mpae','rmse','mae','r2'}, default None
                             the metric to sort the result by
@@ -2484,13 +2492,6 @@ class Forecaster:
         """
         df = pd.DataFrame()
         for f in self.forecasts.keys():
-            if self.info[f]['model_form'].startswith('Splice'):
-                if spliced_models == 'skip':
-                    continue
-                elif spliced_models == 'error':
-                    raise TypeError('cannot write stats for spliced models')
-                else:
-                    raise ValueError(f'spliced_models argument not recognized: {spliced_models}')
             append = {
                 'name':[self.name],
                 'series_start_date':[self.current_dates[0]],
