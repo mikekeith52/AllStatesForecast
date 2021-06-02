@@ -8,6 +8,7 @@ pip install pandas-datareader==0.9.0
 pip install statsmodels==0.12.1
 pip install ipywidgets==7.5.1
 pip install itertools
+pip install xgboost
 conda install -c anaconda ephem
 conda install -c conda-forge pystan
 conda install -c conda-forge fbprophet

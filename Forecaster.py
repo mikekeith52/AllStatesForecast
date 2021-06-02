@@ -27,9 +27,11 @@ class Forecaster:
             average (any number of models can be averaged)
             ets (exponental smoothing state space model - R forecast::ets)
             gbt (gradient boosted trees - sklearn)
+            xgboost (xgboost)
             hwes (holt-winters exponential smoothing - statsmodels hwes)
             auto_hwes (holt-winters exponential smoothing - statsmodels hwes)
             lasso (sklearn)
+            elasticnet (sklearn)
             mlp (multi level perceptron - sklearn)
             mlr (multi linear regression - sklearn)
             prophet (facebook prophet - fbprophet)
@@ -1937,6 +1939,36 @@ class Forecaster:
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
+    def forecast_xgboost(self,test_length=1,Xvars='all',call_me='xgboost',hyper_params={},set_feature_importance=True):
+        """ forecasts the stored y variable with the xboost library (https://xgboost.readthedocs.io/en/latest/python/python_intro.html)
+            Parameters: test_length : int, default 1
+                            the length of the resulting test_set
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or "all", default "all"
+                            the independent variables to use in the resulting X dataframes
+                        call_me : str, default "rf"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        hyper_params : dict, default {}
+                            any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+                            passed as an argument collection (**hyper_params) to the sklearn model
+                        set_feature_importance : bool or any other data type, default True
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
+                            value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+                            not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
+        """
+        from xgboost import XGBRegressor
+        self._ready_for_forecast(True)
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        self.info[call_me] = self._get_info_dict()
+        X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
+        regr = XGBRegressor(**hyper_params,random_state=20)
+        self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
+        self._set_remaining_info(call_me,test_length,'Xgboost - {}'.format(hyper_params))
+        if set_feature_importance:
+            self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
+
     def forecast_adaboost(self,test_length=1,Xvars='all',call_me='adaboost',hyper_params={},set_feature_importance=True):
         """ forecasts the stored y variable with an ada boost regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.AdaBoostRegressor.html)
             Parameters: test_length : int, default 1
@@ -2051,6 +2083,39 @@ class Forecaster:
         regr = Ridge(alpha=alpha)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
         self._set_remaining_info(call_me,test_length,'Ridge - {}'.format(alpha))
+        if set_feature_importance:
+            self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
+
+    def forecast_elasticnet(self,test_length=1,Xvars='all',call_me='elasticnet',alpha=1.0,hyper_params={},set_feature_importance=True):
+        """ forecasts the stored y variable with an elasticnet from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.ElasticNet.html#sklearn.linear_model.ElasticNet)
+            Parameters: test_length : int, default 1
+                            the length of the resulting test_set
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or "all", default "all"
+                            the independent variables to use in the resulting X dataframes
+                        call_me : str, default "lasso"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        alpha : float, default 1.0
+                            the desired alpha hyperparameter to pass to the sklearn model
+                            1.0 is also the default in sklearn
+                        hyper_params : dict, default {}
+                            hyper paramaters other than alpha that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+                            passed as an argument collection (**hyper_params) to the sklearn model
+                        set_feature_importance : bool or any other data type, default True
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
+                            value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+                            not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
+        """
+        from sklearn.linear_model import ElasticNet
+        self._ready_for_forecast(True)
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        self.info[call_me] = self._get_info_dict()
+        X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
+        regr = ElasticNet(alpha=alpha,**hyper_params)
+        self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
+        self._set_remaining_info(call_me,test_length,'ElasticNet - Alpha: {} Hyper Params: {}'.format(alpha,hyper_params))
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
@@ -2279,6 +2344,9 @@ class Forecaster:
         if isinstance(which,str):
             self.forecasts.pop(which)
             self.mape.pop(which)
+            self.rmse.pop(which)
+            self.mae.pop(which)
+            self.r2.pop(which)
             self.info.pop(which)
             if which in self.feature_importance.keys():
                 self.feature_importance.pop(which)
@@ -2424,7 +2492,6 @@ class Forecaster:
         labels = ['Actual']
 
         for m in plot_these_models:
-            # plots with dates if dates are available, else plots with ambiguous integers
             test_figs = self.info[m]['test_set_predictions']
             test_dates = self.current_dates[-len(test_figs):]
             sns.lineplot(x=test_dates,y=test_figs,linestyle='--',alpha=0.7)
@@ -2482,10 +2549,6 @@ class Forecaster:
         """ outputs stats about each forecast and returns a pandas dataframe
             Parameters: order_by : one of {None,'mpae','rmse','mae','r2'}, default None
                             the metric to sort the result by
-                        spliced_models : one of {'skip','error'}
-                            what to do with spliced models since they don't have the same stats/info as other models
-                            'skip' skips them
-                            'error' raises an error
                         print_df : bool, default False
                             whether to print the dataframe
                         keywords are columns and corresponding values to also add to the dataframe
@@ -2507,7 +2570,7 @@ class Forecaster:
                 'test_set_r2':[self.r2[f]],
                 'last_predicted_test_value':[self.info[f]['test_set_predictions'][-1]],
                 'last_actual_test_value':[self.info[f]['test_set_actuals'][-1]],
-                'is_best_model':[1 if self.best_model == f else 0]
+                'is_best_model':[int(self.best_model == f)]
             }
             for k,v in kwargs.items():
                 append[k] = [v]

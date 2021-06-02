@@ -193,6 +193,7 @@ there are two ways to initialize a Forecaster object:
   - [forecast_auto_arima_seas()](#forecast_auto_arima_seas) 
   - [forecast_auto_hwes()](#forecast_auto_hwes)
   - [forecast_average()](#forecast_average)  
+  - [forecast_elasticnet()](#forecast_elasticnet)
   - [forecast_ets()](#forecast_ets)
   - [forecast_gbt()](#forecast_gbt)
   - [forecast_hwes()](#forecast_hwes)
@@ -209,10 +210,11 @@ there are two ways to initialize a Forecaster object:
   - [forecast_tbats()](#forecast_tbats)
   - [forecast_var()](#forecast_var)
   - [forecast_vecm()](#forecast_vecm)
+  - [forecast_xgboost()](#forecast_xgboost)
 
 ### forecast_adaboost
 - `Forecaster.forecast_adaboost(test_length=1,Xvars='all',call_me='adaboost',hyper_params={},set_feature_importance=True)`
-- forecasts the stored y variable with an ada boost regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.AdaBoostRegressor.html)
+- forecasts with an ada boost regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.AdaBoostRegressor.html)
 - Parameters: 
   - **test_length** : int, default 1
     - the length of the resulting test_set
@@ -371,6 +373,28 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
     - if int is greater than one of the stored models' test length, this will fail  
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults  
 
+### forecast_elasticnet
+- `Forecaster.forecast_elasticnet(test_length=1,Xvars='all',call_me='elasticnet',alpha=1.0,hyper_params={},set_feature_importance=True)`
+- forecasts with an elasticnet from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.ElasticNet.html#sklearn.linear_model.ElasticNet)
+- Parameters: 
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1 (AssertionError raised if not)
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "lasso"
+    - the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+  - **alpha** : float, default 1.0
+    - the desired alpha hyperparameter to pass to the sklearn model
+    - 1.0 is also the default in sklearn
+  - **hyper_params** : dict, default {}
+    - hyper paramaters other than alpha that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+  - **set_feature_importance** : bool or any other data type, default True
+    - if True, adds a key to self.feature_importance with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults
+
 ### forecast_ets
 - `Forecaster.forecast_ets(test_length=1,call_me='ets')`
 - Exponential Smoothing State Space Model  
@@ -387,7 +411,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ### forecast_gbt
 - `Forecaster.forecast_gbt(test_length=1,Xvars='all',call_me='gbt',hyper_params={},set_feature_importance=True)`
-- forecasts the stored y variable with a gradient boosting regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingRegressor.html)
+- forecasts with a gradient boosting regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingRegressor.html)
 - Parameters: 
   - **test_length** : int, default 1
     - the length of the resulting test_set
@@ -425,7 +449,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ### forecast_lasso
 - `Forecaster.forecast_lasso(test_length=1,Xvars='all',call_me='lasso',alpha=1.0,set_feature_importance=True)`
-- forecasts the stored y variable with a lasso regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Lasso.html)
+- forecasts with a lasso regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Lasso.html)
 - Parameters: 
   - **test_length** : int, default 1
     - the length of the resulting test_set
@@ -445,7 +469,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ### forecast_mlp
 - `Forecaster.forecast_mlp(test_length=1,Xvars='all',call_me='mlp',hyper_params={},set_feature_importance=True)`
-- forecasts the stored y variable with a multi level perceptron neural network from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPRegressor.html)
+- forecasts with a multi level perceptron neural network from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPRegressor.html)
 - Parameters: 
   - **test_length** : int, default 1
     - the length of the resulting test_set
@@ -465,7 +489,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ### forecast_mlr
 - `Forecaster.forecast_mlr(test_length=1,Xvars='all',call_me='mlr',set_feature_importance=True)`
-- forecasts the stored y variable with a multi linear regression from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LinearRegression.html)
+- forecasts with a multi linear regression from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LinearRegression.html)
 - Parameters: 
   - **test_length** : int, default 1
     - the length of the resulting test_set
@@ -482,7 +506,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ### forecast_rf
 - `Forecaster.forecast_rf(test_length=1,Xvars='all',call_me='rf',hyper_params={},set_feature_importance=True)`
-- forecasts the stored y variable with a random forest from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html)
+- forecasts with a random forest from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html)
 - Parameters: 
   - **test_length** : int, default 1
     - the length of the resulting test_set
@@ -502,7 +526,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ### forecast_ridge
 - `Forecaster.forecast_ridge(test_length=1,Xvars='all',call_me='ridge',alpha=1.0,set_feature_importance=True)`
-- forecasts the stored y variable with a ridge regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Ridge.html)
+- forecasts with a ridge regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Ridge.html)
 - Parameters: 
   - **test_length** : int, default 1
     - the length of the resulting test_set
@@ -654,7 +678,7 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 
 ### forecast_svr
 - `Forecaster.forecast_svr(test_length=1,Xvars='all',call_me='svr',hyper_params={},set_feature_importance=True)`
-- forecasts the stored y variable with a support vector regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVR.html)
+- forecasts with a support vector regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVR.html)
 - Parameters: 
   - **test_length** : int, default 1
     - the length of the resulting test_set
@@ -780,6 +804,26 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 - See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults 
 - See [Analysis 7](#analysis-7) for an example of how to run a vector error correction model
 
+### forecast_xgboost  
+- `Forecaster.forecast_xgboost(test_length=1,Xvars='all',call_me='xgboost',hyper_params={},set_feature_importance=True)`
+- forecasts with the xboost library (https://xgboost.readthedocs.io/en/latest/python/python_intro.html)
+- Parameters: 
+  - **test_length** : int, default 1
+    - the length of the resulting test_set
+    - must be at least 1
+  - **Xvars** : list or "all", default "all"
+    - the independent variables to use in the resulting X dataframes
+  - **call_me** : str, default "xgboost"
+    - the model's nickname -- this name carries to the info, mape, and forecasts attributes
+  - **hyper_params** : dict, default {}
+    - any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+    - passed as an argument collection to the sklearn model
+  - **set_feature_importance** : bool, default True
+    - if True, adds a key to feature_importance attribute with the call_me parameter as a key
+    - value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+    - not setting this to True means it will be ignored, which improves speed
+- See [forecast_auto_arima()](#forecast_auto_arima) documentation for an example of how to call a forecast method and access reults 
+
 ## Plotting
 1. `Forecaster.plot(models='all',metric='mape',plot_fitted=False,print_model_form=False,print_metric=False)`
 - Plots time series results of the stored forecasts  
@@ -862,15 +906,11 @@ ma1  0.222933  0.042513  5.243861  2.265347e-07
 ```
 
 ## View Forecast Stats
-- `Forecaster.vomit(order_by=None,spliced_models='skip',**kwargs)`
+- `Forecaster.vomit(order_by=None,print_df=False,**kwargs)`
 - outputs stats about each forecast and returns a pandas dataframe
 - Parameters: 
   - order_by : one of {None,'mape','rmse','mae','r2'}, default None
     - the metric to sort the result by
-  - spliced_models : one of {'skip','error'}
-    - what to do with spliced models since they don't have the same stats/info as other models
-    - 'skip' skips them
-    - 'error' raises an error
   - print_df : bool, default False
     - whether to print the dataframe
   - keywords are columns and corresponding values to also add to the dataframe
