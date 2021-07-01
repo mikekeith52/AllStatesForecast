@@ -1,4 +1,7 @@
 # Scaled Forecasting with Python
+
+*Please see the [scalecast project](https://github.com/mikekeith52/scalecast) for an updated and more dynamic version of the Forecaster module.*  
+
 Builds the Forecaster object to create easily accessed forecasts for many time series
 
 ## Scenario
