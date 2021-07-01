@@ -27,9 +27,11 @@ class Forecaster:
             average (any number of models can be averaged)
             ets (exponental smoothing state space model - R forecast::ets)
             gbt (gradient boosted trees - sklearn)
+            xgboost (xgboost)
             hwes (holt-winters exponential smoothing - statsmodels hwes)
             auto_hwes (holt-winters exponential smoothing - statsmodels hwes)
             lasso (sklearn)
+            elasticnet (sklearn)
             mlp (multi level perceptron - sklearn)
             mlr (multi linear regression - sklearn)
             prophet (facebook prophet - fbprophet)
@@ -191,9 +193,8 @@ class Forecaster:
                         Xvars = self.ordered_xreg[:top_xreg]
             elif Xvars == 'all':
                 Xvars = list(self.current_xreg.keys())
-            else:
-                print(f'Xvars argument not recognized: {Xvars}, changing to None')
-                Xvars = None
+            elif not Xvars is None:
+                raise ValueError(f'Xvars argument not recognized: {Xvars}')
 
         for lib in libs:
             try:  importr(lib)
@@ -203,13 +204,11 @@ class Forecaster:
 
         if isinstance(Xvars,list):
             current_df = current_df[['y'] + Xvars] # reorder columns 
-        elif Xvars is None:
+        else:
             current_df = current_df['y']
-        elif Xvars != 'all':
-           raise ValueError(f'unknown argument passed to Xvars: {Xvars}')
 
         if 'tmp' not in os.listdir():
-            os.mkdir('tmp')
+            os.mkdir('tmp') # where all 
 
         current_df.to_csv(f'tmp/tmp_r_current.csv',index=False)
         
@@ -242,10 +241,10 @@ class Forecaster:
             self.r2[call_me] = None
 
     def _ready_for_forecast(self,need_xreg=False):
-        """ runs before each attempted to forecast to make sure:
+        """ runs before each attempt to forecast to make sure:
                 y is set as a list of numeric figures
-                current_dates is set as a list of datetime objects
-                future_dates is set as a list of datetime objects
+                current_dates is set as a list of datetime-like objects
+                future_dates is set as a list of datetime-like objects
                 if current_xreg is set, future_xreg is also set and both are dictionaries with lists as values
         """  
         _no_error_ = 'before forecasting, the following issues need to be corrected:'
@@ -407,10 +406,18 @@ class Forecaster:
 
     def keep_smaller_history(self,n):
         """ keeps a certain number of observations from the dependent variable's history and trims y, current_dates, and current_xreg attributes to all match
-            Paramaters: n : int
-                the last number of observations to keep from the time series' history
+            Paramaters: n : int, datetime/pandas timestamp object, or str in yyyy-mm-dd format
+                the last number of observations to keep from the time series' history or the last date to keep
         """
-        assert isintance(n,int) & (n > 2), 'n must be an int type and greater than 2'
+        try:
+            self._ready_for_forecast()
+        except ForecastFormatError as e:
+            raise ForecastFormatError(f'before calling keep_smaller_history, please make sure all forecast properties are configured properly:\n{e}')
+        if isinstance(n,str):
+            n = datetime.datetime.strptime(n,'%Y-%m-%d')
+        if (type(n) is datetime.datetime) or (type(n) is pd.Timestamp):
+            n = len([i for i in self.current_dates if i >= n])
+        assert (isinstance(n,int)) & (n > 2), 'n must be an int, datetime object, or str in yyyy-mm-dd format and there must be more than 2 observations to keep'
         self.y = self.y[-n:]
         self.current_dates = self.current_dates[-n:]
         for k, v in self.current_xreg.items():
@@ -1095,7 +1102,7 @@ class Forecaster:
             Parameters: test_length : int, default 1
                             the number of periods to holdout in order to test the model
                             must be at least 1 (AssertionError raised if not)
-                        seasonal : bool, default False
+                        seasonal : bool or None, default False
                             whether there is seasonality in the series
                         seasonal_periods : int, default None
                             the number of periods to complete one seasonal period (for monthly, this is 12)
@@ -1115,7 +1122,7 @@ class Forecaster:
         if seasonal:
             assert isinstance(seasonal_periods,int),'seasonal_periods must be int type when seasonal is True'
             assert seasonal_periods > 0,'seasonal_periods must be greater than 1 when seasonal is True'
-        elif not seasonal:
+        elif (not seasonal) | (seasonal is None):
             seasonal_periods = None
         else:
             raise ValueError(f'argument passed to seasonal not recognized: {seasonal}')
@@ -1128,24 +1135,15 @@ class Forecaster:
         dates = self.current_dates[:]
 
         scores = [] # lower is better
-        if y.min() > 0:
-            grid = expand_grid({
-                'trend':[None,'add','mul'],
-                'seasonal':[None] if not seasonal else ['add','mul'],
-                'damped_trend':[True,False],
-                'use_boxcox':[True,False,0], # the last one is a log transformation
-                'seasonal_periods':[None] if not seasonal else [seasonal_periods]
-            })
-        else: # multiplicative trends only work for series of all positive figures
-            grid = expand_grid({
-                'trend':[None,'add'],
-                'seasonal':[None] if not seasonal else ['add'],
-                'damped_trend':[True,False],
-                'use_boxcox':[None], # the last one is a log transformation
-                'seasonal_periods':[None] if not seasonal else [seasonal_periods]
-            })
+        grid = expand_grid({
+            'trend':[None,'add','mul'] if y.min() > 0 else [None,'add'],
+            'seasonal':[None] if seasonal_periods is None else ['add','mul'] if y.min() > 0 else ['add'],
+            'damped_trend':[True,False],
+            'use_boxcox':[True,False,0] if y.min() > 0 else [None], # 0 is a log transformation
+            'seasonal_periods':[seasonal_periods]
+        })
 
-        grid = grid.loc[((grid['trend'].isnull()) & (~grid['damped_trend'])) | (~grid['trend'].isnull())].reset_index(drop=True) # it does not know how to damp when there is no trend
+        grid = grid.loc[((grid['trend'].isnull()) & (~grid['damped_trend'])) | (~grid['trend'].isnull())].reset_index(drop=True) # model does not damp when there is no trend
 
         for i, params in grid.iterrows():
             hwes_scored = HWES(y_train,dates=dates,initialization_method='estimated',**params).fit(optimized=True,use_brute=True)
@@ -1941,6 +1939,36 @@ class Forecaster:
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
+    def forecast_xgboost(self,test_length=1,Xvars='all',call_me='xgboost',hyper_params={},set_feature_importance=True):
+        """ forecasts the stored y variable with the xboost library (https://xgboost.readthedocs.io/en/latest/python/python_intro.html)
+            Parameters: test_length : int, default 1
+                            the length of the resulting test_set
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or "all", default "all"
+                            the independent variables to use in the resulting X dataframes
+                        call_me : str, default "rf"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        hyper_params : dict, default {}
+                            any hyper paramaters that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+                            passed as an argument collection (**hyper_params) to the sklearn model
+                        set_feature_importance : bool or any other data type, default True
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
+                            value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+                            not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
+        """
+        from xgboost import XGBRegressor
+        self._ready_for_forecast(True)
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        self.info[call_me] = self._get_info_dict()
+        X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
+        regr = XGBRegressor(**hyper_params,random_state=20)
+        self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
+        self._set_remaining_info(call_me,test_length,'Xgboost - {}'.format(hyper_params))
+        if set_feature_importance:
+            self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
+
     def forecast_adaboost(self,test_length=1,Xvars='all',call_me='adaboost',hyper_params={},set_feature_importance=True):
         """ forecasts the stored y variable with an ada boost regressor from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.AdaBoostRegressor.html)
             Parameters: test_length : int, default 1
@@ -2055,6 +2083,39 @@ class Forecaster:
         regr = Ridge(alpha=alpha)
         self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
         self._set_remaining_info(call_me,test_length,'Ridge - {}'.format(alpha))
+        if set_feature_importance:
+            self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
+
+    def forecast_elasticnet(self,test_length=1,Xvars='all',call_me='elasticnet',alpha=1.0,hyper_params={},set_feature_importance=True):
+        """ forecasts the stored y variable with an elasticnet from sklearn (https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.ElasticNet.html#sklearn.linear_model.ElasticNet)
+            Parameters: test_length : int, default 1
+                            the length of the resulting test_set
+                            must be at least 1 (AssertionError raised if not)
+                        Xvars : list or "all", default "all"
+                            the independent variables to use in the resulting X dataframes
+                        call_me : str, default "lasso"
+                            the model's nickname -- this name carries to the self.info, self.mape, and self.forecasts dictionaries
+                        alpha : float, default 1.0
+                            the desired alpha hyperparameter to pass to the sklearn model
+                            1.0 is also the default in sklearn
+                        hyper_params : dict, default {}
+                            hyper paramaters other than alpha that you want changed from the default setting from sklearn, parameter is key, desired setting is value
+                            passed as an argument collection (**hyper_params) to the sklearn model
+                        set_feature_importance : bool or any other data type, default True
+                            if True, adds a key to self.feature_importance with the call_me parameter as a key
+                            value is the feature_importance dataframe from eli5 in a pandas dataframe data type
+                            not setting this to True means it will be ignored, which improves speed
+            ***See forecast_auto_arima() documentation for an example of how to call a forecast method and access reults
+        """
+        from sklearn.linear_model import ElasticNet
+        self._ready_for_forecast(True)
+        assert isinstance(test_length,int), f'test_length must be an int, not {type(test_length)}'
+        assert test_length >= 1, 'test_length must be at least 1'
+        self.info[call_me] = self._get_info_dict()
+        X, y, X_train, X_test, y_train, y_test = self._train_test_split(test_length=test_length,Xvars=Xvars)
+        regr = ElasticNet(alpha=alpha,**hyper_params)
+        self._score_and_forecast(call_me,regr,X,y,X_train,y_train,X_test,y_test,Xvars)
+        self._set_remaining_info(call_me,test_length,'ElasticNet - Alpha: {} Hyper Params: {}'.format(alpha,hyper_params))
         if set_feature_importance:
             self.feature_importance[call_me] = self._set_feature_importance(X,y,regr)
 
@@ -2192,13 +2253,17 @@ class Forecaster:
 
     def forecast_splice(self,models,periods,call_me='splice',**kwargs):
         """ splices multiple forecasts together
-            this model will have no mape, test periods, etc, but will be saved in the forecasts attribute
+            this model's metrics will be an average of the models in models and the test_set_predictions will be from the first model in models
+                the metric values can be overwritten by passing one of them to kwargs (ex. r2 = .95 will assign .95 to the object's r2 attribute)
             Parameters: models : list
-                        periods : tuple of datetime objects
-                            must be one less in length than models
+                            each element is model nickname of already-evaluated forecasts
+                        periods : list-like of datetime objects or str objects in yyyy-mm-dd format
+                            the model splice points
+                            length must be one less than length of models
                             each date represents a splice
                                 model[0] --> :periods[0]
                                 models[-1] --> periods[-1]:
+                            no mixing data types (no str and datetime objects)
                         call_me : str
                             the model nickname
                         keywords should be the name of a metric ('mape','rmse','mae','r2') and a numeric value as the argument since some functions don't evaluate without numeric metrics
@@ -2207,12 +2272,23 @@ class Forecaster:
         assert isinstance(models,list), 'models must be a list'
         assert len(models) >= 2, 'need at least two models passed to models'
         assert np.array([m in self.forecasts.keys() for m in models]).all(), 'all models must have been evaluated already'
-        assert isinstance(periods,tuple), 'periods must be a tuple'
+        assert (not isinstance(periods,str)) & (len(periods) > 0), 'periods must be list-like'
         assert len(models) == len(periods) + 1, 'models must be exactly 1 greater in length than periods'
-        assert np.array([p in self.future_dates for p in periods]).all(), 'all elements in periods must be datetime objects in future_dates'
+
+        if isinstance(periods[0],str):
+            periods = [datetime.datetime.strptime(i,'%Y-%m-%d') for i in periods]
+
+        assert np.array([p in self.future_dates for p in periods]).all(), 'all elements in periods must be datetime objects or str in yyyy-mm-dd format and must be in future_dates attribute'
 
         self.info[call_me] = self._get_info_dict()
         self.info[call_me]['model_form'] = "Splice of {}; splice point(s): {}".format(', '.join([k for k in self.info if k in models]), ', '.join([v.strftime('%Y-%m-%d') for v in periods]))
+        self.info[call_me]['test_set_actuals'] = self.info[models[0]]['test_set_actuals'][:]
+        self.info[call_me]['test_set_predictions'] = self.info[models[0]]['test_set_predictions'][:]
+        self.info[call_me]['holdout_periods'] = len(self.info[models[0]]['test_set_actuals'])
+        self.mape[call_me] = np.mean([self.mape[m] for m in models])
+        self.rmse[call_me] = np.mean([self.rmse[m] for m in models])
+        self.mae[call_me] = np.mean([self.mae[m] for m in models])
+        self.r2[call_me] = np.mean([self.r2[m] for m in models])
         self.forecasts[call_me] = [None]*self.forecast_out_periods
 
         for kw,v in kwargs.items():
@@ -2221,6 +2297,7 @@ class Forecaster:
             else:
                 raise ValueError(f'keyword {kw} not recognized!')
         
+        periods = sorted(periods) # just in case
         # splice
         start = 0
         for i in range(len(periods)):
@@ -2267,6 +2344,9 @@ class Forecaster:
         if isinstance(which,str):
             self.forecasts.pop(which)
             self.mape.pop(which)
+            self.rmse.pop(which)
+            self.mae.pop(which)
+            self.r2.pop(which)
             self.info.pop(which)
             if which in self.feature_importance.keys():
                 self.feature_importance.pop(which)
@@ -2385,8 +2465,8 @@ class Forecaster:
         else:
             raise ValueError(f'models must be list or str, got {type(models)}')
 
-        if isinstance(include_train,int):
-            assert include_train > 1, 'include_train must be greater than 1'
+        if str(include_train).isnumeric():
+            assert (include_train > 1) & isinstance(include_train,int), f'include_train must be a bool type or an int greater than 1, got {include_train}'
             actuals = self.y[-include_train:]
             full_dates = self.current_dates[-include_train:]
         elif isinstance(include_train,bool):
@@ -2412,7 +2492,6 @@ class Forecaster:
         labels = ['Actual']
 
         for m in plot_these_models:
-            # plots with dates if dates are available, else plots with ambiguous integers
             test_figs = self.info[m]['test_set_predictions']
             test_dates = self.current_dates[-len(test_figs):]
             sns.lineplot(x=test_dates,y=test_figs,linestyle='--',alpha=0.7)
@@ -2446,7 +2525,7 @@ class Forecaster:
         """
         df = pd.DataFrame(index=self.future_dates)
         if isinstance(which,str):
-            if (which == 'all') | (which.startswith('top_') & (int(which.split('_')[1]) > len(self.forecasts.keys()))):
+            if which == 'all':
                 for m in self.order_all_forecasts_best_to_worst(metric)[:]:
                     df[m] = self.forecasts[m]
             elif which.startswith('top_'):
@@ -2466,27 +2545,16 @@ class Forecaster:
 
         return df
 
-    def vomit(self,order_by=None,spliced_models='skip',print_df=False,**kwargs):
+    def vomit(self,order_by=None,print_df=False,**kwargs):
         """ outputs stats about each forecast and returns a pandas dataframe
             Parameters: order_by : one of {None,'mpae','rmse','mae','r2'}, default None
                             the metric to sort the result by
-                        spliced_models : one of {'skip','error'}
-                            what to do with spliced models since they don't have the same stats/info as other models
-                            'skip' skips them
-                            'error' raises an error
                         print_df : bool, default False
                             whether to print the dataframe
                         keywords are columns and corresponding values to also add to the dataframe
         """
         df = pd.DataFrame()
         for f in self.forecasts.keys():
-            if self.info[f]['model_form'].startswith('Splice'):
-                if spliced_models == 'skip':
-                    continue
-                elif spliced_models == 'error':
-                    raise TypeError('cannot write stats for spliced models')
-                else:
-                    raise ValueError(f'spliced_models argument not recognized: {spliced_models}')
             append = {
                 'name':[self.name],
                 'series_start_date':[self.current_dates[0]],
@@ -2502,7 +2570,7 @@ class Forecaster:
                 'test_set_r2':[self.r2[f]],
                 'last_predicted_test_value':[self.info[f]['test_set_predictions'][-1]],
                 'last_actual_test_value':[self.info[f]['test_set_actuals'][-1]],
-                'is_best_model':[1 if self.best_model == f else 0]
+                'is_best_model':[int(self.best_model == f)]
             }
             for k,v in kwargs.items():
                 append[k] = [v]
